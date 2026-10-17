@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.2.3
+// @version      1.2.4
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -361,6 +361,14 @@ void main() {
       return fs;
     }
 
+    // B 站（非全屏）：光晕当页面背景用 —— 宿主固定为 #app。
+    // 必须在这里就返回，否则会被下面「往上找已定位容器」的逻辑先截胡（那就变成播放器容器了）。
+    if (IS_BILIBILI) {
+      return document.querySelector('#app')
+        || document.querySelector('#mirror-vdcon')?.parentElement
+        || document.body;
+    }
+
     let el = video.parentElement;
     let firstClipped = null;
     let depth = 0;
@@ -379,10 +387,6 @@ void main() {
       try { cs = getComputedStyle(start); } catch (e) { break; }
       if (cs.position !== 'static' && !isClipped(cs)) return start;
       start = start.parentElement;
-    }
-    // B 站：拿 #app 当宿主，光晕插进它的最前面当背景
-    if (IS_BILIBILI) {
-      return document.querySelector('#app') || document.querySelector('#mirror-vdcon')?.parentElement || document.body;
     }
     // YouTube 专用兜底
     return document.querySelector('ytd-player') || document.querySelector('#player') || document.body;
@@ -407,10 +411,10 @@ void main() {
     // B 站：光晕当页面背景用 —— 插到 #app 最前面 + z-index: 0，
     // 这样它位于页面背景之上、所有内容（标题 / 推荐 / 控制栏）之下，永远不会挡住文字。
     // YouTube：叠在最上层，画面本体在着色器里已 discard，不会挡住视频。
-    if (IS_BILIBILI) {
-      host.insertBefore(c, host.firstChild);
+    if (IS_BILIBILI && host.id === 'app') {
+      host.insertBefore(c, host.firstChild);   // 页面背景层：在所有内容之下
     } else {
-      host.appendChild(c);
+      host.appendChild(c);                    // 全屏 / YouTube：叠在最上层
     }
     return c;
   }
