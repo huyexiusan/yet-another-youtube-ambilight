@@ -2,7 +2,7 @@
 
 > 中文 | [English](README.en.md)
 
-给网页里的视频加一圈氛围光晕：以画面中心为极点向外扩散，颜色沿半径回到画面内部取样。\n\n支持 **YouTube** 与 **Bilibili**（www / player）。B 站页面文字密集，光晕范围会自动收窄到画面短边的 16%，避免糊住标题与推荐列表。
+给网页里的视频加一圈氛围光晕：以画面中心为极点向外扩散，颜色沿半径回到画面内部取样。\n\n支持 **YouTube** 与 **Bilibili**（www / player）。B 站是白底页面，光晕层改用 mix-blend-mode: multiply 混合：白底被染色、文字保持清晰，不会像普通半透明那样糊成一片。
 
 ![效果](docs/final.png)
 
