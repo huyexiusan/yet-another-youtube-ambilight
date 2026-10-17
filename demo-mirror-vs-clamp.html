@@ -1,0 +1,409 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>光晕取色方式对比：边缘拉伸 vs 向内反向查找</title>
+<style>
+  :root {
+    --bg: #0a0b0f; --panel: #14161c; --line: rgba(255,255,255,.1);
+    --txt: #e6e7ea; --dim: #8b8d96; --mint: #6ee7b7; --rose: #fb7185;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #171b26 0%, var(--bg) 60%);
+    color: var(--txt);
+    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    padding: 26px 22px 40px;
+  }
+  header { max-width: 1180px; margin: 0 auto 18px; }
+  h1 { font-size: 19px; font-weight: 650; margin: 0 0 6px; }
+  h1 small { font-weight: 400; color: var(--dim); font-size: 12.5px; margin-left: 8px; }
+  .sub { color: var(--dim); font-size: 12.5px; margin: 0; max-width: 920px; }
+  .sub code { color: #c9d1d9; background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+
+  .grid { max-width: 1180px; margin: 20px auto 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .pane .head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .pane.a .dot { background: var(--rose); box-shadow: 0 0 10px var(--rose); }
+  .pane.b .dot { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
+  .pane .head em { font-style: normal; color: var(--dim); font-weight: 400; margin-left: auto; font-size: 11px; }
+  .pane canvas { display: block; width: 100%; height: auto; aspect-ratio: 520 / 400; }
+
+  .bar { max-width: 1180px; margin: 18px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 22px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+  .ctl { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--dim); }
+  .ctl output { color: var(--mint); font-variant-numeric: tabular-nums; min-width: 40px; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 150px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.18); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--mint); cursor: pointer; }
+  .chk { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--dim); cursor: pointer; user-select: none; }
+  .chk input { accent-color: #34d399; width: 15px; height: 15px; cursor: pointer; }
+  select {
+    background: rgba(255,255,255,.08); color: #dfe2e8; border: 1px solid rgba(255,255,255,.16);
+    border-radius: 8px; padding: 4px 8px; font-size: 12px; outline: none; cursor: pointer;
+  }
+  select option { background: #16181f; color: #dfe2e8; }
+
+  .legend { max-width: 1180px; margin: 16px auto 0; color: var(--dim); font-size: 12px; line-height: 1.8; }
+  .legend b { color: #cbd5e1; font-weight: 600; }
+  .legend code { background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 4px; color: #c9d1d9; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>光晕取色方式对比 <small>YouTube Ambilight 复刻</small></h1>
+  <p class="sub">
+    同一张「视频画面」、同一套模糊与透明度，只改画面外侧像素的<b>取色方式</b>。
+    左侧 = 原插件做法（UV 越界后被 <code>CLAMP_TO_EDGE</code> 钳制，边缘像素被无限拉长）；
+    右侧 = 本脚本做法（以画面中心为极点，沿半径反向查回画面内部取真实像素）。
+  </p>
+</header>
+
+<div class="grid">
+  <div class="pane a">
+    <div class="head"><span class="dot"></span>原版：边缘像素拉伸（CLAMP_TO_EDGE）<em>色带 / 台阶</em></div>
+    <canvas id="cvA"></canvas>
+  </div>
+  <div class="pane b">
+    <div class="head"><span class="dot"></span>本脚本：向内反向查找（MIRROR）<em>放射 / 无台阶</em></div>
+    <canvas id="cvB"></canvas>
+  </div>
+</div>
+
+<div class="bar">
+  <label class="ctl">模糊 <input id="blur" type="range" min="0" max="100" step="1" value="0"><output id="blurOut">0</output></label>
+  <label class="ctl">反向查找 <input id="lookback" type="range" min="0.2" max="3" step="0.05" value="1"><output id="lookbackOut">1.00</output></label>
+  <label class="chk"><input id="zoom" type="checkbox"> 6× 放大镜（看边缘台阶）</label>
+  <label class="ctl">右栏采样
+    <select id="rightMode">
+      <option value="2" selected>沿中心射线反查</option>
+      <option value="1">镜像折叠</option>
+    </select>
+  </label>
+</div>
+
+<div class="legend">
+  <b>怎么看：</b>把「模糊」拖到 0，再勾上「6× 放大镜」。左图画面边缘外侧会出现一条被拉长的纯色带，斜边处断裂成阶梯；
+  右图同一位置是沿「中心→像素」这条半径反查到的真实像素，越靠外取色越深但会收敛。<br />
+  <b>为什么：</b>越界的 UV 被 clamp 后，整圈光晕都只在采样「最外一行/一列」像素，1 个像素被拉成几十个像素，
+  任何 1px 的差异都会被放大成台阶；沿中心射线反查让半径上每一点取到不同深度的真实像素，只收敛、不翻转，也不会翻到画面另一侧。
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- 1. 测试画面 ---------- */
+  function makeSource(w, h) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+
+    const bg = g.createLinearGradient(0, 0, w, h);
+    bg.addColorStop(0, '#16233d');
+    bg.addColorStop(0.55, '#0c1322');
+    bg.addColorStop(1, '#05070d');
+    g.fillStyle = bg;
+    g.fillRect(0, 0, w, h);
+
+    // 右上橙色圆（部分出界）
+    const r = Math.round(w * 0.27);
+    const cx = Math.round(w * 0.82), cy = Math.round(h * 0.27);
+    const gr = g.createRadialGradient(cx - r * .3, cy - r * .35, r * .08, cx, cy, r);
+    gr.addColorStop(0, '#ffe3b8'); gr.addColorStop(.5, '#ff9f43'); gr.addColorStop(1, '#d9480f');
+    g.fillStyle = gr;
+    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
+
+    // 左下青色圆（贴边）
+    g.fillStyle = '#22d3ee';
+    g.beginPath(); g.arc(-w * 0.02, h * 0.80, w * 0.24, 0, Math.PI * 2); g.fill();
+
+    // 45° 白色斜带（贯穿画面，与边界斜交 —— 锯齿最明显的地方）
+    g.save();
+    g.translate(w * .5, h * .5);
+    g.rotate(-Math.PI / 4);
+    const band = g.createLinearGradient(-w, 0, w, 0);
+    band.addColorStop(0, 'rgba(255,255,255,0)');
+    band.addColorStop(.5, 'rgba(255,255,255,.92)');
+    band.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = band;
+    g.fillRect(-w * 1.2, -h * .06, w * 2.4, h * .12);
+    g.restore();
+
+    // 底部绿色渐变条（贴边）
+    const bot = g.createLinearGradient(0, h, 0, h * .84);
+    bot.addColorStop(0, '#34d399');
+    bot.addColorStop(1, 'rgba(52,211,153,0)');
+    g.fillStyle = bot;
+    g.fillRect(0, h * .84, w, h * .16);
+
+    // 顶部 1px 紫色细线
+    g.fillStyle = '#a78bfa';
+    g.fillRect(0, 0, w, 4);
+
+    // 高频栅格
+    g.strokeStyle = 'rgba(255,255,255,.20)';
+    g.lineWidth = 1;
+    for (let x = 0; x < w; x += 12) {
+      g.beginPath(); g.moveTo(x + .5, h * .30); g.lineTo(x + .5, h * .44); g.stroke();
+    }
+
+    // 画面边框
+    g.strokeStyle = 'rgba(255,255,255,.14)';
+    g.lineWidth = 2;
+    g.strokeRect(1, 1, w - 2, h - 2);
+
+    return c;
+  }
+
+  /* ---------- 2. 着色器 ---------- */
+  const VERT = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aPos;
+out vec2 vUV;
+void main(){
+  vUV = vec2(aPos.x*0.5+0.5, 0.5-aPos.y*0.5);
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+  const FRAG = `#version 300 es
+precision highp float;
+in vec2 vUV;
+out vec4 outColor;
+
+uniform sampler2D uTex;
+uniform vec2  uRectMin, uRectSize;
+uniform vec2  uMargin;
+uniform float uAspect;
+uniform float uBlur;
+uniform float uLookback;
+uniform float uMode;      // 0 = 边缘拉伸, 1 = 镜像折叠, 2 = 沿扩散方向反查
+uniform float uDepth;
+uniform float uZoom;
+uniform vec2  uZoomCenter;
+
+const float GOLDEN = 2.39996323;
+const int TAPS = 24;
+
+vec3 tapAt(vec2 uv){
+  vec2 hi     = vec2(uAspect, 1.0);
+  vec2 p      = uv * hi;
+  vec2 center = hi * 0.5;          // 扩散的极点 = 画面中心
+  vec2 v      = p - center;
+
+  float r   = length(v);
+  vec2  dir = r > 1e-6 ? v / r : vec2(0.0, 1.0);
+
+  vec2  halfSize = hi * 0.5;
+  vec2  tt       = halfSize / max(abs(dir), vec2(1e-6));
+  float rEdge    = min(tt.x, tt.y);
+
+  // 画面内部：直接取真实像素
+  if (r <= rEdge) return texture(uTex, clamp(p / hi, vec2(0.0), vec2(1.0))).rgb;
+
+  float d = r - rEdge;
+
+  if (uMode < 0.5) {
+    // ① 原版：整圈光晕都取边界点，被拉长
+    return texture(uTex, clamp(center + dir * rEdge, vec2(0.0), hi) / hi).rgb;
+  }
+  if (uMode < 1.5) {
+    // ② 镜像：关于边界半径反射
+    float rr = abs(rEdge - (r - rEdge) * uLookback);
+    return texture(uTex, clamp(center + dir * rr, vec2(0.0), hi) / hi).rgb;
+  }
+  // ③ 极坐标取色：光晕越往外，取的颜色越靠近画面中心（沿线方向严格线性）
+  vec2  halfOuter = hi * 0.5 + vec2(uMargin.y);   // 光晕外边界 = 画面外扩 margin
+  vec2  to        = halfOuter / max(abs(dir), vec2(1e-6));
+  float rOuter    = min(to.x, to.y);
+
+  float span  = max(rOuter - rEdge, 1e-4);
+  float kFull = rEdge / span;
+  float k     = mix(1.0, kFull, clamp(uDepth, 0.0, 1.0));
+  float s     = min((r - rEdge) * k, rEdge);
+  float rr    = rEdge - s;
+  return texture(uTex, clamp(center + dir * rr, vec2(0.0), hi) / hi).rgb;
+}
+
+vec3 blurred(vec2 uv){
+  if (uBlur <= 0.00005) return tapAt(uv);
+  float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+  vec3 acc = tapAt(uv) * 0.12;
+  float wsum = 0.12;
+  for (int i = 0; i < TAPS; i++) {
+    float fi = float(i) + 0.5;
+    float rn = sqrt(fi / float(TAPS));
+    float rad = rn * uBlur;
+    float w = exp(-2.8 * rn * rn) + 1e-4;
+    float ang = fi * GOLDEN + jitter;
+    vec2 off = vec2(cos(ang), sin(ang) / uAspect) * rad;
+    acc += tapAt(uv + off) * w;
+    wsum += w;
+  }
+  return acc / wsum;
+}
+
+void main(){
+  vec2 p = vUV;
+  if (uZoom > 1.0) p = uZoomCenter + (vUV - 0.5) / uZoom;
+
+  vec2 uv = (p - uRectMin) / uRectSize;
+
+  bool inside = uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0;
+  if (inside) {
+    // 画面本体照常显示
+    outColor = vec4(texture(uTex, uv).rgb, 1.0);
+    return;
+  }
+
+  vec2 over = max(-uv, uv - 1.0);
+  vec2 q = max(over, 0.0) / max(uMargin, vec2(1e-5));
+  float t = clamp(max(q.x, q.y), 0.0, 1.0);
+
+  float k = clamp((t - 0.10) / 0.90, 0.0, 1.0);
+  float alpha = pow(1.0 - k, 0.85);
+
+  vec3 c = blurred(uv);
+  vec3 bg = vec3(0.055, 0.060, 0.075);
+  outColor = vec4(c * alpha + bg * (1.0 - alpha), 1.0);
+}`;
+
+  /* ---------- 3. 渲染器 ---------- */
+  function createRenderer(canvas, source, side) {
+    const gl = canvas.getContext('webgl2', {
+      alpha: false, antialias: false, depth: false, stencil: false,
+      premultipliedAlpha: false, preserveDrawingBuffer: true,
+    });
+    if (!gl) { console.error('WebGL2 不可用'); return null; }
+
+    const compile = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s)); throw new Error('shader');
+      }
+      return s;
+    };
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { console.error(gl.getProgramInfoLog(prog)); return null; }
+
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+
+    const u = {};
+    ['uTex','uRectMin','uRectSize','uMargin','uAspect','uBlur','uLookback','uMode','uDepth','uZoom','uZoomCenter']
+      .forEach(n => { u[n] = gl.getUniformLocation(prog, n); });
+
+    // 画布 CSS 比例 520:400 = 1.3；视频矩形 16:9
+    const rectW = 0.62;
+    const rectH = rectW * 1.3 * 9 / 16;
+    const rectMin = [(1 - rectW) / 2, (1 - rectH) / 2];
+    const margin = [0.18, 0.18];
+
+    return {
+      render(opts) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = Math.round((canvas.clientWidth || 520) * dpr);
+        const h = Math.round((canvas.clientHeight || 400) * dpr);
+        if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(prog);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+
+        gl.uniform1i(u.uTex, 0);
+        gl.uniform2f(u.uRectMin, rectMin[0], rectMin[1]);
+        gl.uniform2f(u.uRectSize, rectW, rectH);
+        gl.uniform2f(u.uMargin, margin[0], margin[1]);
+        gl.uniform1f(u.uAspect, 16 / 9);
+        gl.uniform1f(u.uBlur, (opts.blur / 100) * 0.34);
+        gl.uniform1f(u.uLookback, opts.lookback);
+        gl.uniform1f(u.uMode, side === 'left' ? 0 : opts.rightMode);
+        gl.uniform1f(u.uDepth, opts.depth);
+        gl.uniform1f(u.uZoom, opts.zoom ? 6.0 : 1.0);
+        gl.uniform2f(u.uZoomCenter, rectMin[0] + 0.015, rectMin[1] + 0.02);
+
+        gl.clearColor(0.055, 0.060, 0.075, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+    };
+  }
+
+  /* ---------- 4. 组装 ---------- */
+  const source = makeSource(1024, 576);
+  const cvA = document.getElementById('cvA');
+  const cvB = document.getElementById('cvB');
+  const rA = createRenderer(cvA, source, 'left');
+  const rB = createRenderer(cvB, source, 'right');
+
+  const blurEl = document.getElementById('blur');
+  const blurOut = document.getElementById('blurOut');
+  const lbEl = document.getElementById('lookback');
+  const lbOut = document.getElementById('lookbackOut');
+  const zoomEl = document.getElementById('zoom');
+
+  const opts = { blur: 0, lookback: 1, zoom: false, rightMode: 2, depth: 1.0 };
+
+  // 支持用 URL 参数预设状态，方便分享/截图：?blur=32&zoom=1&lookback=1
+  const qs = new URLSearchParams(location.search);
+  if (qs.has('blur')) {
+    opts.blur = +qs.get('blur');
+    blurEl.value = opts.blur; blurOut.textContent = opts.blur;
+  }
+  if (qs.has('lookback')) {
+    opts.lookback = +qs.get('lookback');
+    lbEl.value = opts.lookback; lbOut.textContent = opts.lookback.toFixed(2);
+  }
+  if (qs.get('zoom') === '1') { opts.zoom = true; zoomEl.checked = true; }
+
+  const rmEl = document.getElementById('rightMode');
+  rmEl.addEventListener('change', () => { opts.rightMode = +rmEl.value; drawAll(); });
+  if (qs.get('right')) {
+    opts.rightMode = qs.get('right') === 'mirror' ? 1 : 2;
+    rmEl.value = String(opts.rightMode);
+  }
+
+  function drawAll() {
+    if (rA) rA.render(opts);
+    if (rB) rB.render(opts);
+  }
+
+  blurEl.addEventListener('input', () => {
+    opts.blur = +blurEl.value; blurOut.textContent = opts.blur; drawAll();
+  });
+  lbEl.addEventListener('input', () => {
+    opts.lookback = +lbEl.value; lbOut.textContent = opts.lookback.toFixed(2); drawAll();
+  });
+  zoomEl.addEventListener('change', () => { opts.zoom = zoomEl.checked; drawAll(); });
+  window.addEventListener('resize', drawAll);
+
+  drawAll();
+  // 字体/布局稳定后再画一次（尺寸可能刚确定）
+  setTimeout(drawAll, 120);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1039 @@
+﻿// ==UserScript==
+// @name         YouTube 氛围灯 · 镜像反向采样版 (Ambilight Mirror)
+// @namespace    https://github.com/WesselKroos/youtube-ambilight
+// @version      1.0.0
+// @description  复刻 YouTube Ambilight 的外扩光晕；把扩散出去的像素取色方式，从「边缘像素拉伸」改为「向内反向查找视频真实像素」（镜像延拓），消除边缘锯齿与色带。
+// @author       dsh
+// @match        *://*/*
+// @run-at       document-idle
+// @grant        none
+// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMxYTFhMWEiLz48cmVjdCB4PSIyMCIgeT0iMjAiIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgcng9IjMiIGZpbGw9IiNmZmYiLz48L3N2Zz4=
+// ==/UserScript==
+
+/*
+ * 设计说明
+ * ==================
+ *
+ * 原插件（Wessel Kroos / youtube-ambilight）的做法：
+ *   1. 把每一帧视频当纹理上传，开启 mipmap，用 LINEAR_MIPMAP_LINEAR 采样；
+ *   2. 把「视频矩形之外」的一圈像素，用超出 [0,1] 的 UV 去采样，
+ *      纹理是 CLAMP_TO_EDGE，于是整圈光晕取到的都是「视频最外一行/一列像素」；
+ *   3. 再叠一层 canvas 2D 的 filter: blur() 和 alpha 渐变。
+ *
+ * 本脚本的关键改动（用户要求）：
+ *   光晕里每一个像素不再「直接拿边缘像素」，而是沿「由外向内的反方向」
+ *   回走与它向外偏离相同的距离，去视频内部找真实像素（镜像延拓 / mirror padding）：
+ *
+ *       uv 在视频外 → 取 c = clamp(uv, 0, 1) 作最近边界点，
+ *       反方向向量 dir = uv - c，回看点为 c - dir * lookback，
+ *       再用三角波 fold() 折叠回 [0,1]（所以永远命中真实像素）。
+ *
+ *   好处：
+ *     - 边缘处颜色连续（C0/C1 连续），不会出现一条被拉长的硬色带；
+ *     - 光晕颜色随距离平滑变化，同一条边上的每个像素取到的内容都不同；
+ *     - 不需要 mipmap 兜底，也就不会因为 mip 崩塌出现大色块。
+ */
+
+(function () {
+  'use strict';
+
+  /* =========================================================================
+   * 0. 基础工具
+   * ========================================================================= */
+  const BOOT_FLAG = '__ambiMirrorBooted__';
+  if (window[BOOT_FLAG]) return;
+  window[BOOT_FLAG] = true;
+
+  const LS_KEY = 'ambi_mirror_settings_v1';
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const num = (v, d) => (Number.isFinite(+v) ? +v : d);
+
+  const DEFAULTS = {
+    enabled: true,
+    mode: 'sweep',    // sweep = 径向反查 1:1（默认）/ mirror = 镜像 / clamp = 边缘拉伸(原版)
+    expand: 120,      // 光晕扩散范围（占视口短边百分比，120 = 铺满屏幕）
+    blur: 32,         // 模糊强度 0..100
+    opacity: 92,      // 光晕不透明度 0..100
+    lookback: 1.0,    // 镜像模式的折叠倍率
+    fadeStart: 0.12,  // alpha 开始衰减的位置（0=边缘，1=最外）
+    fadeCurve: 0.85,  // 衰减曲线
+    brightness: 100,
+    contrast: 104,
+    saturation: 112,
+    vibrance: 100,
+    resolution: 60,   // 采样纹理分辨率（占原视频宽百分比）
+    maxFps: 30,
+    dither: 0,        // 抖动强度 0..100（默认关，避免颗粒感）
+  };
+
+  const settings = loadSettings();
+  function loadSettings() {
+    let raw = {};
+    try { raw = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch (e) { raw = {}; }
+    const out = Object.assign({}, DEFAULTS, raw || {});
+    for (const k of Object.keys(DEFAULTS)) {
+      if (typeof DEFAULTS[k] === 'number') out[k] = num(out[k], DEFAULTS[k]);
+      else if (typeof DEFAULTS[k] === 'boolean') out[k] = !!out[k];
+      else out[k] = typeof out[k] === 'string' ? out[k] : DEFAULTS[k];
+    }
+    return out;
+  }
+  function saveSettings() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(settings)); } catch (e) { /* 忽略 */ }
+  }
+
+  /* =========================================================================
+   * 1. 着色器
+   *    —— 顶点：一个铺满画布的四边形
+   *    —— 片元：把「视频之外」的像素按镜像反向查找取色，再做模糊/调色/渐变
+   * ========================================================================= */
+  const VERT_SRC = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 aPos;
+out vec2 vUV;
+void main() {
+  // aPos ∈ [-1,1]；转成画布 uv，(0,0) 在左上角，与纹理首行一致
+  vUV = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+  const FRAG_SRC = `#version 300 es
+precision highp float;
+
+in vec2 vUV;
+out vec4 outColor;
+
+uniform sampler2D uTex;
+uniform vec2  uRectMin;     // 视频画面左上角（画布 uv）
+uniform vec2  uRectSize;    // 视频画面尺寸（画布 uv）
+uniform float uExpand;      // 光晕衰减范围（以画面高度为单位）
+uniform float uAspect;      // 视频宽高比 w/h
+uniform float uBlur;        // 模糊半径（视频 uv 单位）
+uniform float uLookback;    // 反向查找倍率
+uniform float uOpacity;     // 0..1
+uniform float uFadeStart;
+uniform float uFadeCurve;
+uniform float uBrightness;  // 1 = 100%
+uniform float uContrast;
+uniform float uSaturation;
+uniform float uVibrance;
+uniform float uDither;
+uniform float uMode;        // 0 = 边缘拉伸(原版)  1 = 镜像  2 = 径向反查 1:1(默认)
+
+const float GOLDEN = 2.39996323;   // 黄金角
+const int   TAPS   = 24;          // 模糊采样点数
+
+/* 取色核心：把光晕上的一个点，映射到视频里真正要采样的位置。
+ *
+ * 扩散是「以画面中心为极点、沿半径向外呈放射状」的：
+ *   光晕像素 P 在以中心为原点的极坐标里是 (r, θ)，r 已经超过该方向上的画面边界半径 rEdge。
+ *   反查时沿同一条半径（θ 不变）回到画面内部，取 r' = rEdge - s 处的像素。
+ */
+vec3 tapAt(vec2 uv) {
+  // 换到「以画面高度为单位」的坐标系，横竖方向的扩散距离才可比
+  vec2 hi     = vec2(uAspect, 1.0);
+  vec2 p      = uv * hi;
+  vec2 center = hi * 0.5;            // 画面中心 = 极点
+  vec2 v      = p - center;
+
+  float r    = length(v);
+  vec2  dir  = r > 1e-6 ? v / r : vec2(0.0, 1.0);   // 这条扩散射线的方向
+
+  // 射线与该方向上画面边界的交点距离
+  vec2  halfSize = hi * 0.5;
+  vec2  tt       = halfSize / max(abs(dir), vec2(1e-6));
+  float rEdge    = min(tt.x, tt.y);
+
+  // 画面内部：直接取真实像素（模糊采样点会落到画面里，这里不能拦）
+  if (r <= rEdge) {
+    return texture(uTex, clamp(p / hi, vec2(0.0), vec2(1.0))).rgb;
+  }
+
+  // 画面外：这条半径已经越界，距离边界 d
+  float d = r - rEdge;
+
+
+  if (uMode < 0.5) {
+    // ① 边缘拉伸：整圈光晕都取边界上的点（原插件的行为）
+    return texture(uTex, clamp(center + dir * rEdge, vec2(0.0), hi) / hi).rgb;
+  }
+
+  if (uMode < 1.5) {
+    // ② 镜像：关于边界半径做反射
+    float rr = abs(rEdge - (r - rEdge) * uLookback);
+    return texture(uTex, clamp(center + dir * rr, vec2(0.0), hi) / hi).rgb;
+  }
+
+  // ③ 径向反查 1:1（默认）：
+  //    沿「中心 → 该像素」这条半径，光晕往外延展多远，就往画面里回查多远。
+  //    按方向归一化后，边和角的取色深度一致，四个角不会出现折痕。
+  // 严格 1:1：往外延展多远，就往画面里回查多远（最多到画面中心）
+  float s  = min(r - rEdge, rEdge);
+  float rr = rEdge - s;
+  return texture(uTex, clamp(center + dir * rr, vec2(0.0), hi) / hi).rgb;
+}
+
+/* 圆形模糊（黄金角螺旋采样），采样点同样走镜像反向查找 */
+vec3 blurred(vec2 uv) {
+  if (uBlur <= 0.00005) return tapAt(uv);
+
+  // 逐像素角度抖动，把螺旋采样核的「花瓣」伪影打散成不可见的噪声
+  // 抖动幅度限制在「一个采样间隔」以内：足够打散螺旋花纹，又不会留下明显颗粒
+  float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * (6.2831853 / float(TAPS));
+
+  vec3 acc = tapAt(uv) * 0.12;
+  float wsum = 0.12;
+  for (int i = 0; i < TAPS; i++) {
+    float fi = float(i) + 0.5;
+    float rn = sqrt(fi / float(TAPS));
+    float rad = rn * uBlur;
+    float w = exp(-2.8 * rn * rn) + 1e-4;          // 近似高斯权重
+    float ang = fi * GOLDEN + jitter;
+    // y 方向除以宽高比，保证在屏幕上是圆的
+    vec2 off = vec2(cos(ang), sin(ang) / uAspect) * rad;
+    acc += tapAt(uv + off) * w;
+    wsum += w;
+  }
+  return acc / wsum;
+}
+
+void main() {
+  // 画布 uv → 视频 uv（视频矩形内是 0..1，外侧会越界，正是我们要的）
+  vec2 uv = (vUV - uRectMin) / uRectSize;
+
+  // 画面内部也填上画面本身的颜色（而不是透明）：
+  // 否则高斯模糊会把边缘处的不透明度平均掉一半，合成后形成一圈暗边。
+  // 真正露出视频，是在 2D 合成之后把画面矩形「挖掉」完成的。
+  if (uv.x > 0.0015 && uv.x < 0.9985 && uv.y > 0.0015 && uv.y < 0.9985) {
+    outColor = vec4(texture(uTex, clamp(uv, 0.0, 1.0)).rgb, 1.0);
+    return;
+  }
+
+  // —— 到画面边界的「欧氏距离」归一化：0 = 贴着视频，1 = 光晕最外缘
+  //    用 length 而不是 max，等值线是圆角矩形，四个角不会出现直角硬边
+  vec2  hiM  = vec2(uAspect, 1.0);
+  vec2  pM   = uv * hiM;
+  vec2  over = max(-pM, pM - hiM);
+  float distEdge = length(max(over, 0.0));
+  float t = clamp(distEdge / max(uExpand, 1e-4), 0.0, 1.0);
+
+  // —— 透明度沿距离衰减（复刻原插件 spreadFadeStart / spreadFadeCurve）
+  float k = clamp((t - uFadeStart) / max(1e-4, 1.0 - uFadeStart), 0.0, 1.0);
+  float alpha = uOpacity * pow(1.0 - k, uFadeCurve);
+  if (alpha <= 0.001) { outColor = vec4(0.0); return; }
+
+  // —— 取色：镜像反向查找 + 模糊
+  vec3 c = tapAt(uv);   // 模糊交给 2D 层的 ctx.filter，避免多 tap 采样产生噪点
+
+  // 亮度 / 对比度
+  c = (c - 0.5) * uContrast + 0.5;
+  c *= uBrightness;
+  c = max(c, vec3(0.0));
+
+  // 饱和度
+  float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(luma), c, uSaturation);
+
+  // 自然饱和度：低饱和区域多补一点
+  float mx = max(c.r, max(c.g, c.b));
+  float mn = min(c.r, min(c.g, c.b));
+  float sat = (mx - mn) / max(mx, 1e-4);
+  c = mix(vec3(luma), c, 1.0 + (uVibrance - 1.0) * (1.0 - sat) * 1.25);
+
+  // 抖动：抵消 8bit 输出在暗部产生的色带
+  float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  c += (n - 0.5) * uDither;
+
+  c = clamp(c, 0.0, 1.0);
+  outColor = vec4(c * alpha, alpha);   // 预乘 alpha
+}`;
+
+  /* =========================================================================
+   * 2. 渲染器
+   * ========================================================================= */
+  const state = {
+    video: null,
+    host: null,
+    canvas: null,
+    gl: null,
+    glCanvas: null,
+    dctx: null,
+    dpr: 1,
+    prog: null,
+    u: {},
+    tex: null,
+    prevTex: null,      // 上一帧纹理（用于轻微的时间平滑，可选关闭）
+    off: null,
+    offCtx: null,
+    texW: 0,
+    texH: 0,
+    cw: 0,
+    ch: 0,
+    lastRect: null,
+    rafId: 0,
+    ro: null,
+    lastDrawTs: 0,
+    lastVideoTime: -1,
+    needDraw: true,
+    blocked: false,     // 跨域污染等不可用状态
+    started: false,
+  };
+
+  const VERTICES = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+
+  function compile(gl, type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(sh);
+      gl.deleteShader(sh);
+      throw new Error('着色器编译失败: ' + log);
+    }
+    return sh;
+  }
+
+  function buildProgram(gl) {
+    const vs = compile(gl, gl.VERTEX_SHADER, VERT_SRC);
+    const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      throw new Error('着色器链接失败: ' + gl.getProgramInfoLog(prog));
+    }
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, VERTICES, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    const names = [
+      'uTex', 'uRectMin', 'uRectSize', 'uExpand', 'uAspect', 'uBlur', 'uLookback',
+      'uOpacity', 'uFadeStart', 'uFadeCurve', 'uBrightness', 'uContrast',
+      'uSaturation', 'uVibrance', 'uDither', 'uMode',
+    ];
+    const u = {};
+    for (const n of names) u[n] = gl.getUniformLocation(prog, n);
+
+    return { prog, u };
+  }
+
+  /* ---- 找一个不会被裁剪、可以承载绝对定位画布的宿主元素 ---- */
+  const isClipped = (cs) =>
+    cs.overflow !== 'visible' || cs.overflowX !== 'visible' || cs.overflowY !== 'visible';
+
+  function pickHost(video) {
+    // 全屏时浏览器只渲染 fullscreenElement 的子树，画布必须放在它里面
+    const fs = document.fullscreenElement;
+    if (fs && fs.contains(video)) {
+      if (getComputedStyle(fs).position === 'static') {
+        fs.dataset.ambiOldPos = '1';
+        fs.style.position = 'relative';
+      }
+      return fs;
+    }
+
+    let el = video.parentElement;
+    let firstClipped = null;
+    let depth = 0;
+    while (el && el !== document.body && depth++ < 12) {
+      let cs;
+      try { cs = getComputedStyle(el); } catch (e) { break; }
+      if (isClipped(cs)) { firstClipped = el; break; }
+      el = el.parentElement;
+    }
+
+    // 从「被裁剪的祖先」的父级往外找，挑一个已定位的容器
+    let start = firstClipped ? firstClipped.parentElement : el;
+    let guard = 0;
+    while (start && start !== document.documentElement && guard++ < 8) {
+      let cs;
+      try { cs = getComputedStyle(start); } catch (e) { break; }
+      if (cs.position !== 'static' && !isClipped(cs)) return start;
+      start = start.parentElement;
+    }
+    // YouTube 专用兜底
+    return document.querySelector('ytd-player') || document.querySelector('#player') || document.body;
+  }
+
+  function makeCanvas(host) {
+    const c = document.createElement('canvas');
+    c.id = 'ambi-mirror-canvas';
+    c.setAttribute('aria-hidden', 'true');
+    Object.assign(c.style, {
+      position: 'fixed',
+      pointerEvents: 'none',
+      zIndex: '2147482000',
+      display: 'none',
+      borderRadius: '0',
+      margin: '0',
+      padding: '0',
+      border: '0',
+      background: 'transparent',
+    });
+    // 必须叠在 <video> 之上：视频元素的黑边区域也要被光晕染色，
+    // 画面本体在着色器里已经 discard 掉了，所以不会挡住视频。
+    host.appendChild(c);
+    return c;
+  }
+
+  function computeLayout() {
+    const v = state.video;
+    if (!v) return null;
+    const r = v.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+
+    const vw = v.videoWidth || 16;
+    const vh = v.videoHeight || 9;
+
+    // <video> 可能带 object-fit: contain 的黑边，换算出真正的画面区域
+    const scale = Math.min(r.width / vw, r.height / vh);
+    const dispW = vw * scale;
+    const dispH = vh * scale;
+    const dispX = r.left + (r.width - dispW) / 2;
+    const dispY = r.top + (r.height - dispH) / 2;
+
+    // 画布铺满整个视口：光晕才能从画面一直扩散到屏幕边缘
+    const viewW = Math.max(1, window.innerWidth);
+    const viewH = Math.max(1, window.innerHeight);
+
+    return {
+      vw, vh,
+      dispW, dispH,
+      cssW: viewW,
+      cssH: viewH,
+      // 画面在画布里的位置（画布 uv 比例）
+      rectMinX: dispX / viewW,
+      rectMinY: dispY / viewH,
+      rectSizeX: dispW / viewW,
+      rectSizeY: dispH / viewH,
+    };
+  }
+
+  function applyLayout(L) {
+    const c = state.canvas;
+
+    // 限制总像素量，避免 4K + 高 DPR 直接把 GPU 打满
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const MAX_PIX = 3.2e6;
+    const need = L.cssW * L.cssH * dpr * dpr;
+    if (need > MAX_PIX) dpr = Math.sqrt(MAX_PIX / (L.cssW * L.cssH));
+
+    const cw = Math.max(2, Math.round(L.cssW * dpr));
+    const ch = Math.max(2, Math.round(L.cssH * dpr));
+
+    const posKey = `fixed,${Math.round(L.cssW)},${Math.round(L.cssH)},${cw}x${ch}`;
+    if (state.lastRect === posKey) return;
+    state.lastRect = posKey;
+
+    c.style.display = 'block';
+    c.style.left = '0px';
+    c.style.top = '0px';
+    c.style.width = L.cssW + 'px';
+    c.style.height = L.cssH + 'px';
+
+    if (c.width !== cw || c.height !== ch) {
+      c.width = cw;
+      c.height = ch;
+    }
+    if (state.glCanvas && (state.glCanvas.width !== cw || state.glCanvas.height !== ch)) {
+      state.glCanvas.width = cw;
+      state.glCanvas.height = ch;
+    }
+    state.cw = cw;
+    state.ch = ch;
+    state.dpr = dpr;
+  }
+
+  function ensureTexture(gl, vw, vh) {
+    const targetW = Math.round(clamp(vw * settings.resolution / 100, 96, 1600));
+    const targetH = Math.max(2, Math.round(targetW * vh / vw));
+    if (state.tex && state.texW === targetW && state.texH === targetH) return;
+
+    state.texW = targetW;
+    state.texH = targetH;
+
+    if (!state.tex) {
+      state.tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, state.tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, state.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, targetW, targetH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+    // 中间绘制用的 2D 画布（先把视频缩小，再上传，省显存带宽）
+    if (!state.off) state.off = document.createElement('canvas');
+    state.off.width = targetW;
+    state.off.height = targetH;
+    state.offCtx = state.off.getContext('2d', { alpha: false, desynchronized: true });
+  }
+
+  function uploadFrame(gl) {
+    const v = state.video;
+    if (!v || v.readyState < 2 || !state.texW) return;
+    try {
+      state.offCtx.drawImage(v, 0, 0, state.texW, state.texH);
+      gl.bindTexture(gl.TEXTURE_2D, state.tex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, state.off);
+      state.lastVideoTime = v.currentTime;
+    } catch (err) {
+      // 跨域视频会污染 canvas，此时无法读取像素
+      state.blocked = true;
+      setStatus('该视频受跨域限制，无法读取画面');
+    }
+  }
+
+  function draw() {
+    const gl = state.gl;
+    const v = state.video;
+    if (!gl || !v || state.blocked) return;
+
+    const L = computeLayout();
+    if (!L || L.dispW < 8 || L.dispH < 8) {
+      if (state.canvas) state.canvas.style.display = 'none';
+      return;
+    }
+    applyLayout(L);
+
+    ensureTexture(gl, L.vw, L.vh);
+    uploadFrame(gl);
+
+    if (!state.cw || !state.ch) return;
+    gl.viewport(0, 0, state.cw, state.ch);
+    gl.useProgram(state.prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, state.tex);
+
+    const u = state.u;
+    // 光晕衰减范围：以画面高度为单位（默认扩散到视口短边的 120%）
+    const expandPx = Math.max(1, Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
+    const expandHi = expandPx / L.dispH;
+
+    const rectMinX = L.rectMinX;
+    const rectMinY = L.rectMinY;
+    const rectSizeX = L.rectSizeX;
+    const rectSizeY = L.rectSizeY;
+
+    gl.uniform1i(u.uTex, 0);
+    gl.uniform2f(u.uRectMin, rectMinX, rectMinY);
+    gl.uniform2f(u.uRectSize, rectSizeX, rectSizeY);
+    gl.uniform1f(u.uExpand, expandHi);
+    if (!state.__ambiLog) { state.__ambiLog = 1; console.log('[ambi] rect=' + [rectMinX.toFixed(3), rectMinY.toFixed(3), rectSizeX.toFixed(3), rectSizeY.toFixed(3)].join(',') + ' expand=' + expandHi.toFixed(3) + ' canvas=' + L.cssW + 'x' + L.cssH); }
+    gl.uniform1f(u.uAspect, L.vw / L.vh);
+    gl.uniform1f(u.uBlur, (settings.blur / 100) * 0.34);
+    gl.uniform1f(u.uLookback, clamp(settings.lookback, 0, 4));
+    gl.uniform1f(u.uMode, settings.mode === 'clamp' ? 0 : settings.mode === 'mirror' ? 1 : 2);
+    gl.uniform1f(u.uOpacity, clamp(settings.opacity / 100, 0, 1));
+    gl.uniform1f(u.uFadeStart, clamp(settings.fadeStart, 0, 0.98));
+    gl.uniform1f(u.uFadeCurve, clamp(settings.fadeCurve, 0.1, 4));
+    gl.uniform1f(u.uBrightness, settings.brightness / 100);
+    gl.uniform1f(u.uContrast, settings.contrast / 100);
+    gl.uniform1f(u.uSaturation, settings.saturation / 100);
+    gl.uniform1f(u.uVibrance, settings.vibrance / 100);
+    gl.uniform1f(u.uDither, (settings.dither / 100) * 0.02);
+
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // —— 浏览器原生高斯模糊（参考原版：2D canvas + ctx.filter）
+    const dctx = state.dctx;
+    const out = state.canvas;
+    if (dctx && out) {
+      // 原版公式：blurPx = blur2 * (height / 512) * 1.275
+      const blurPx = settings.blur * (state.ch / 512) * 1.275;
+      dctx.filter = blurPx > 0.5 ? 'blur(' + blurPx.toFixed(2) + 'px)' : 'none';
+      dctx.clearRect(0, 0, out.width, out.height);
+      dctx.drawImage(state.glCanvas, 0, 0, out.width, out.height);
+      dctx.filter = 'none';
+
+      // 把画面区域挖掉，露出上面的 <video>；这样光晕只留在画面之外，边缘不会被压暗
+      const px = rectMinX * out.width;
+      const py = rectMinY * out.height;
+      const pw = rectSizeX * out.width;
+      const ph = rectSizeY * out.height;
+      // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
+      // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
+      // 溶解宽度 = 模糊半径，但最多吃掉画面短边的 12%，避免大模糊时画面被吞掉
+      const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
+      dctx.globalCompositeOperation = 'destination-out';
+      dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
+      dctx.fillStyle = '#000';
+      dctx.fillRect(px + feather * 0.5, py + feather * 0.5,
+                    Math.max(1, pw - feather), Math.max(1, ph - feather));
+      dctx.filter = 'none';
+      dctx.globalCompositeOperation = 'source-over';
+    }
+  }
+
+  function tick(ts) {
+    state.rafId = requestAnimationFrame(tick);
+    if (!state.started || !state.video) return;
+    if (document.hidden) return;
+    if (state.blocked) return;
+
+    const v = state.video;
+    if (!v.videoWidth) return;
+
+    if (v.paused || v.ended) {
+      // 暂停时只需要画一次（尺寸变化或拖动进度条时会置位）
+      if (state.needDraw) { state.needDraw = false; draw(); }
+      return;
+    }
+
+    const minGap = 1000 / clamp(settings.maxFps, 1, 60);
+    if (ts - state.lastDrawTs < minGap) return;
+    state.lastDrawTs = ts;
+    draw();
+  }
+
+  /* =========================================================================
+   * 3. 生命周期
+   * ========================================================================= */
+  function deinit() {
+    if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = 0; }
+    if (state.ro) { try { state.ro.disconnect(); } catch (e) {} state.ro = null; }
+    if (state.video && state.video.__ambiListeners) {
+      const l = state.video.__ambiListeners;
+      state.video.removeEventListener('loadedmetadata', l.onMeta);
+      state.video.removeEventListener('resize', l.onMeta);
+      state.video.removeEventListener('seeked', l.redraw);
+      state.video.removeEventListener('pause', l.redraw);
+      state.video.removeEventListener('play', l.redraw);
+      delete state.video.__ambiListeners;
+    }
+    if (state.host && state.host.dataset && state.host.dataset.ambiOldPos) {
+      state.host.style.position = '';
+      delete state.host.dataset.ambiOldPos;
+    }
+    state.host = null;
+    if (state.canvas) { state.canvas.remove(); state.canvas = null; }
+    state.dctx = null;
+    state.glCanvas = null;
+    if (state.gl) { try { state.gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch (e) {} }
+    state.gl = null;
+    state.prog = null;
+    state.tex = null;
+    state.off = null;
+    state.offCtx = null;
+    state.texW = state.texH = 0;
+    state.lastRect = null;
+    state.started = false;
+    state.video = null;
+    state.blocked = false;
+  }
+
+  function attach(video) {
+    if (!video || state.video === video) return;
+    deinit();
+
+    state.video = video;
+    state.host = pickHost(video);
+    if (!state.host) return;
+
+    state.canvas = makeCanvas(state.host);
+    state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+    // WebGL 渲染到一张离屏画布，再由 2D 层用 ctx.filter='blur()' 做浏览器原生高斯模糊
+    // （和原版一致：不在着色器里多 tap 采样，所以完全没有颗粒噪点）
+    state.glCanvas = document.createElement('canvas');
+
+    let gl = null;
+    try {
+      gl = state.glCanvas.getContext('webgl2', {
+        alpha: true,
+        premultipliedAlpha: true,
+        antialias: false,
+        depth: false,
+        stencil: false,
+        desynchronized: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'high-performance',
+      });
+    } catch (e) { gl = null; }
+
+    if (!gl) {
+      setStatus('浏览器不支持 WebGL2，无法渲染');
+      return;
+    }
+    state.gl = gl;
+
+    try {
+      const built = buildProgram(gl);
+      state.prog = built.prog;
+      state.u = built.u;
+    } catch (e) {
+      setStatus('着色器初始化失败：' + e.message);
+      return;
+    }
+
+    state.started = true;
+    state.needDraw = true;
+    if (!state.rafId) state.rafId = requestAnimationFrame(tick);
+
+    // 播放器自身尺寸变化（影院模式切换等）不一定触发 window.resize
+    if (window.ResizeObserver) {
+      try {
+        state.ro = new ResizeObserver(() => {
+          state.lastRect = null;
+          state.needDraw = true;
+        });
+        state.ro.observe(video);
+      } catch (e) { /* ignore */ }
+    }
+
+    // 视频事件：暂停、跳转、尺寸变化都要重画
+    const redraw = () => { state.needDraw = true; };
+    const onMeta = () => { state.lastRect = null; state.needDraw = true; };
+    video.addEventListener('loadedmetadata', onMeta);
+    video.addEventListener('resize', onMeta);
+    video.addEventListener('seeked', redraw);
+    video.addEventListener('pause', redraw);
+    video.addEventListener('play', redraw);
+    video.__ambiListeners = { onMeta, redraw };
+  }
+
+  /* =========================================================================
+   * 4. 全局事件
+   * ========================================================================= */
+  let statusText = '';
+  let shadowRoot = null;
+  function setStatus(t) {
+    statusText = t;
+    if (!shadowRoot) return;
+    const el = shadowRoot.getElementById('ambi-mirror-status');
+    if (el) el.textContent = t;
+  }
+
+  window.addEventListener('resize', () => { state.lastRect = null; state.needDraw = true; }, { passive: true });
+  window.addEventListener('scroll', () => { state.lastRect = null; state.needDraw = true; }, { passive: true, capture: true });
+  document.addEventListener('fullscreenchange', () => {
+    // 全屏时只渲染全屏元素内部，需要把画布挪进全屏容器
+    const fsEl = document.fullscreenElement;
+    if (fsEl && state.video && fsEl.contains(state.video)) {
+      const v = state.video;
+      deinit();
+      setTimeout(() => attach(v), 60);
+    } else if (state.video) {
+      state.lastRect = null;
+      state.needDraw = true;
+    }
+  });
+  document.addEventListener('yt-navigate-finish', () => {
+    state.lastRect = null;
+    state.needDraw = true;
+    setTimeout(bootstrap, 300);
+  });
+  window.addEventListener('yt-navigate-finish', () => {
+    state.lastRect = null;
+    state.needDraw = true;
+    setTimeout(bootstrap, 300);
+  });
+
+  /* =========================================================================
+   * 5. 设置面板
+   * ========================================================================= */
+  const PANEL_CSS = `
+    :host { all: initial; }
+    .wrap {
+      position: fixed; right: 16px; bottom: 16px; z-index: 2147483000;
+      font: 12px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: #eaeaea; user-select: none;
+    }
+    .fab {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(20,20,22,.82); border: 1px solid rgba(255,255,255,.16);
+      color: #fff; font-size: 17px; cursor: pointer; display: flex;
+      align-items: center; justify-content: center; backdrop-filter: blur(8px);
+      box-shadow: 0 4px 16px rgba(0,0,0,.35); transition: transform .15s, background .15s;
+      margin-left: auto;
+    }
+    .fab:hover { background: rgba(40,40,44,.92); transform: scale(1.06); }
+    .panel {
+      display: none; width: 268px; margin-bottom: 8px; padding: 12px 14px 14px;
+      background: rgba(18,18,20,.92); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 14px; backdrop-filter: blur(14px);
+      box-shadow: 0 10px 40px rgba(0,0,0,.5);
+      max-height: 72vh; overflow-y: auto;
+    }
+    .panel.open { display: block; }
+    .panel h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .04em; color: #9fe8d0; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 0; }
+    .row label { flex: 1; color: #cfcfd4; font-size: 11.5px; }
+    .row .val { width: 46px; text-align: right; color: #8fe0c4; font-variant-numeric: tabular-nums; font-size: 11px; }
+    input[type=range] {
+      -webkit-appearance: none; appearance: none; width: 100%; height: 3px;
+      background: rgba(255,255,255,.16); border-radius: 2px; outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+      background: #6ee7b7; box-shadow: 0 0 6px rgba(110,231,183,.6); cursor: pointer;
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 12px; height: 12px; border: none; border-radius: 50%;
+      background: #6ee7b7; cursor: pointer;
+    }
+    .switch { display: flex; align-items: center; gap: 8px; }
+    .switch input { accent-color: #34d399; width: 15px; height: 15px; cursor: pointer; }
+    .hint { margin: 4px 0 8px; font-size: 10.5px; line-height: 1.45; color: #8a8a92; }
+    .hint b { color: #9fe8d0; font-weight: 600; }
+    .btns { display: flex; gap: 8px; margin-top: 12px; }
+    .btns button {
+      flex: 1; padding: 6px 0; font-size: 11px; cursor: pointer;
+      background: rgba(255,255,255,.08); color: #ddd;
+      border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+    }
+    .btns button:hover { background: rgba(255,255,255,.16); }
+    .status { margin-top: 8px; font-size: 10.5px; color: #f0a8a8; min-height: 13px; }
+  `;
+
+  const CONTROLS = [
+    { key: 'expand', label: '扩散范围', min: 10, max: 300, step: 5, unit: '%' },
+    { key: 'blur', label: '模糊', min: 0, max: 100, step: 1, unit: '' },
+    { key: 'opacity', label: '不透明度', min: 0, max: 100, step: 1, unit: '%' },
+    { key: 'lookback', label: '折叠倍率（镜像）', min: 0.2, max: 3, step: 0.05, unit: '×', note: '仅「镜像」模式生效' },
+    { key: 'fadeStart', label: '渐变起点', min: 0, max: 0.9, step: 0.01, unit: '' },
+    { key: 'fadeCurve', label: '渐变曲线', min: 0.2, max: 3, step: 0.05, unit: '' },
+    { key: 'brightness', label: '亮度', min: 0, max: 200, step: 1, unit: '%' },
+    { key: 'contrast', label: '对比度', min: 40, max: 200, step: 1, unit: '%' },
+    { key: 'saturation', label: '饱和度', min: 0, max: 200, step: 1, unit: '%' },
+    { key: 'vibrance', label: '色彩（自然饱和度）', min: 0, max: 200, step: 1, unit: '%' },
+    { key: 'resolution', label: '采样分辨率', min: 20, max: 100, step: 5, unit: '%' },
+    { key: 'maxFps', label: '帧率上限', min: 10, max: 60, step: 5, unit: 'fps' },
+    { key: 'dither', label: '抖动（去色带）', min: 0, max: 100, step: 1, unit: '%' },
+  ];
+
+  function createPanel() {
+    if (document.getElementById('ambi-mirror-root')) return;
+
+    const host = document.createElement('div');
+    host.id = 'ambi-mirror-root';
+    host.style.cssText = 'all:initial;position:fixed;inset:auto 0 0 auto;z-index:2147483000;';
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadowRoot = shadow;
+
+    const style = document.createElement('style');
+    style.textContent = PANEL_CSS;
+    shadow.appendChild(style);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'wrap';
+
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+
+    const title = document.createElement('h3');
+    title.textContent = '氛围灯 · 镜像反向采样';
+    panel.appendChild(title);
+
+    // 总开关
+    const swRow = document.createElement('div');
+    swRow.className = 'row';
+    swRow.innerHTML = '<label style="font-weight:600;color:#e8e8ea">启用</label>';
+    const sw = document.createElement('div');
+    sw.className = 'switch';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = settings.enabled;
+    cb.addEventListener('change', () => {
+      settings.enabled = cb.checked;
+      saveSettings();
+      if (!cb.checked) { deinit(); } else { bootstrap(true); }
+    });
+    sw.appendChild(cb);
+    swRow.appendChild(sw);
+    panel.appendChild(swRow);
+
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.innerHTML = '以画面中心为极点沿半径反查：光晕<b>往外延展多少，就往画面里回查多少（1:1）</b>，贴着画面处取边界色。';
+    panel.appendChild(hint);
+
+    // 采样方式
+    const modeRow = document.createElement('div');
+    modeRow.className = 'row';
+    const modeLab = document.createElement('label');
+    modeLab.textContent = '采样方式';
+    const sel = document.createElement('select');
+    sel.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.08);color:#e6e6e8;' +
+      'border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:4px 6px;font-size:11.5px;outline:none;';
+    [['sweep', '径向反查 1:1（默认）'], ['mirror', '镜像折叠'], ['clamp', '边缘拉伸（原版）']].forEach(([v, txt]) => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = txt;
+      if (settings.mode === v) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', () => {
+      settings.mode = sel.value;
+      saveSettings();
+      state.needDraw = true;
+    });
+    modeRow.appendChild(modeLab);
+    modeRow.appendChild(sel);
+    panel.appendChild(modeRow);
+
+    // 滑块
+    for (const c of CONTROLS) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const lab = document.createElement('label');
+      lab.textContent = c.label;
+      const val = document.createElement('span');
+      val.className = 'val';
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = c.min;
+      input.max = c.max;
+      input.step = c.step;
+      input.value = settings[c.key];
+      input.style.width = '100%';
+
+      const shown = () => {
+        const v = settings[c.key];
+        val.textContent = (c.key === 'fadeStart' || c.key === 'fadeCurve')
+          ? v.toFixed(2)
+          : (Number.isInteger(c.step) ? Math.round(v) : v.toFixed(2)) + c.unit;
+      };
+      shown();
+
+      input.addEventListener('input', () => {
+        settings[c.key] = parseFloat(input.value);
+        shown();
+        saveSettings();
+        state.needDraw = true;
+      });
+
+      const box = document.createElement('div');
+      box.style.cssText = 'flex:2;display:flex;align-items:center;gap:8px;';
+      box.appendChild(input);
+      box.appendChild(val);
+      row.appendChild(lab);
+      row.appendChild(box);
+      panel.appendChild(row);
+
+      if (c.note) {
+        const n = document.createElement('div');
+        n.className = 'hint';
+        n.style.margin = '-2px 0 6px';
+        n.textContent = c.note;
+        panel.appendChild(n);
+      }
+    }
+
+    // 按钮
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+    const reset = document.createElement('button');
+    reset.textContent = '恢复默认';
+    reset.addEventListener('click', () => {
+      Object.assign(settings, DEFAULTS);
+      saveSettings();
+      shadow.querySelectorAll('input[type=range]').forEach((el, i) => {
+        el.value = settings[CONTROLS[i].key];
+        el.dispatchEvent(new Event('input'));
+      });
+      state.needDraw = true;
+    });
+    const close = document.createElement('button');
+    close.textContent = '收起';
+    close.addEventListener('click', () => panel.classList.remove('open'));
+    btns.appendChild(reset);
+    btns.appendChild(close);
+    panel.appendChild(btns);
+
+    const status = document.createElement('div');
+    status.className = 'status';
+    status.id = 'ambi-mirror-status';
+    panel.appendChild(status);
+
+    const fab = document.createElement('button');
+    fab.className = 'fab';
+    fab.title = '氛围灯设置';
+    fab.textContent = '◐';
+    fab.addEventListener('click', () => panel.classList.toggle('open'));
+
+    wrap.appendChild(panel);
+    wrap.appendChild(fab);
+    shadow.appendChild(wrap);
+    document.documentElement.appendChild(host);
+  }
+
+  /* =========================================================================
+   * 6. 启动
+   * ========================================================================= */
+  function findVideo() {
+    const candidates = Array.from(document.querySelectorAll('video'));
+    let best = null;
+    let bestArea = 0;
+    for (const v of candidates) {
+      const r = v.getBoundingClientRect();
+      const area = r.width * r.height;
+      if (area > bestArea && r.width > 100 && r.height > 60) {
+        best = v;
+        bestArea = area;
+      }
+    }
+    return best || document.querySelector('video.html5-main-video') || null;
+  }
+
+  let observer = null;
+  let retryTimer = 0;
+
+  function bootstrap(force) {
+    if (!settings.enabled) return;
+    const v = findVideo();
+    if (!v) {
+      watchForVideo();
+      return;
+    }
+    if (v === state.video && state.started && !force) return;
+    attach(v);
+  }
+
+  function watchForVideo() {
+    if (observer) return;
+    observer = new MutationObserver(() => {
+      const v = findVideo();
+      if (v) {
+        observer.disconnect();
+        observer = null;
+        attach(v);
+      }
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => {
+      if (observer) { observer.disconnect(); observer = null; }
+      bootstrap(false);
+    }, 4000);
+  }
+
+  function start() {
+    createPanel();
+    bootstrap(false);
+    // YouTube 是单页应用，定期兜底检查视频元素是否被换掉
+    setInterval(() => {
+      if (!settings.enabled) return;
+      const v = findVideo();
+      if (v && v !== state.video) attach(v);
+    }, 2500);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+
+  // 方便在控制台里调试
+  window.__ambiMirror = { state, settings, bootstrap, attach, deinit, saveSettings };
+})();

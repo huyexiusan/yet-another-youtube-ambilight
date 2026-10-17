@@ -1,0 +1,18 @@
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# 本地临时产物
+*.log
+_chrome_profile/
+_prof*/
+_*.png
+
+# 但保留 docs 里的截图
+!docs/*.png

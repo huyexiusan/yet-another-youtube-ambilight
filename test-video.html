@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Ambilight Mirror · 端到端测试</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #stage { position: relative; }
+  video { display: block; width: 880px; height: 495px; background: #000; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <video id="v" autoplay muted playsinline></video>
+  </div>
+
+  <script>
+    // 用 canvas 生成一段动画，captureStream 喂给 <video>，
+    // 这样在 headless 里也能有一个「正在播放的跨帧视频」
+    const c = document.createElement('canvas');
+    c.width = 880; c.height = 495;
+    const g = c.getContext('2d');
+
+    const STILL = new URLSearchParams(location.search).get('still') === '1';
+    function frame(t) {
+      const W = c.width, H = c.height;
+      const bg = g.createLinearGradient(0, 0, W, H);
+      bg.addColorStop(0, '#16233d');
+      bg.addColorStop(1, '#05070d');
+      g.fillStyle = bg;
+      g.fillRect(0, 0, W, H);
+
+      // 移动的橙色圆
+      const cx = W * (0.35 + 0.25 * Math.sin(t / 900));
+      const cy = H * (0.45 + 0.15 * Math.cos(t / 700));
+      const r = 120;
+      const gr = g.createRadialGradient(cx - 30, cy - 40, 10, cx, cy, r);
+      gr.addColorStop(0, '#ffe3b8');
+      gr.addColorStop(0.5, '#ff9f43');
+      gr.addColorStop(1, '#d9480f');
+      g.fillStyle = gr;
+      g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
+
+      // 左下青色块
+      g.fillStyle = '#22d3ee';
+      g.beginPath(); g.arc(-20, H * 0.82, 150, 0, Math.PI * 2); g.fill();
+
+      // 45° 白斜带
+      g.save();
+      g.translate(W * 0.5, H * 0.5);
+      g.rotate(-Math.PI / 4 + Math.sin(t / 1500) * 0.12);
+      g.fillStyle = 'rgba(255,255,255,.92)';
+      g.fillRect(-W, -28, W * 2, 56);
+      g.restore();
+
+      // 顶部紫线 + 底部绿条
+      g.fillStyle = '#a78bfa';
+      g.fillRect(0, 0, W, 5);
+      const bot = g.createLinearGradient(0, H, 0, H * 0.86);
+      bot.addColorStop(0, '#34d399');
+      bot.addColorStop(1, 'rgba(52,211,153,0)');
+      g.fillStyle = bot;
+      g.fillRect(0, H * 0.86, W, H * 0.14);
+
+      if (!STILL) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    const v = document.getElementById('v');
+    v.srcObject = c.captureStream(30);
+    v.play().catch(() => {});
+
+    // 对齐参考框：红框 = <video> 的实际矩形，用来检查光晕是否与画面边界重合
+    const box = document.createElement('div');
+    box.id = 'alignBox';
+    box.style.cssText = 'position:fixed;border:2px solid red;pointer-events:none;z-index:99;display:none';
+    document.body.appendChild(box);
+    function syncBox() {
+      const r = v.getBoundingClientRect();
+      const show = new URLSearchParams(location.search).get('align') === '1';
+      box.style.display = show ? 'block' : 'none';
+      box.style.left = r.left + 'px';
+      box.style.top = r.top + 'px';
+      box.style.width = (r.width - 4) + 'px';
+      box.style.height = (r.height - 4) + 'px';
+      requestAnimationFrame(syncBox);
+    }
+    requestAnimationFrame(syncBox);
+    // 允许用 URL 参数覆盖设置：?mode=sweep|mirror|clamp&blur=0&depth=0.3&spread=10
+    const qs = new URLSearchParams(location.search);
+    const KEY = 'ambi_mirror_settings_v1';
+    const override = {};
+    if (qs.get('mode')) override.mode = qs.get('mode');
+    ['blur', 'depth', 'spread', 'opacity'].forEach((k) => {
+      if (qs.has(k)) override[k] = +qs.get(k);
+    });
+    if (Object.keys(override).length) {
+      let cur = {};
+      try { cur = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { cur = {}; }
+      localStorage.setItem(KEY, JSON.stringify(Object.assign(cur, override)));
+    }
+
+    // 注入被测脚本（相当于 Tampermonkey 加载）
+    const s = document.createElement('script');
+    s.src = 'youtube-ambilight-mirror.user.js';
+    document.body.appendChild(s);
+  </script>
+</body>
+</html>
