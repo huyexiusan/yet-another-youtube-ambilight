@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.1
+// @version      1.3.2
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -392,26 +392,6 @@ void main() {
     return document.querySelector('ytd-player') || document.querySelector('#player') || document.body;
   }
 
-  // 参考 fork 的做法：顶栏是 fixed 且不透明（z-index 1002），会挡住背景层的光晕。
-  // 这里只在 B 站注入样式把它变透明，让光晕能从顶栏区域透上来。
-  const HEADER_STYLE_ID = 'ambi-mirror-header-style';
-  function ensureHeaderTransparent() {
-    if (!IS_BILIBILI) return;
-    if (document.getElementById(HEADER_STYLE_ID)) return;
-    const st = document.createElement('style');
-    st.id = HEADER_STYLE_ID;
-    st.textContent = [
-      // 顶栏透光：它是 fixed + z-index 1002，不透明的话会挡住背景层光晕
-      '.bili-header__bar { background: transparent !important; }',
-      '.bili-header__bar .left-entry, .bili-header__bar .right-entry { background: transparent !important; }',
-      '.bili-header .bili-header__banner { background: transparent !important; }',
-      // 播放器容器清空背景（对应 fork 的 #player / .html5-video-player { background: none }）：
-      // B 站这几个容器默认有纯黑背景，会把光晕盖死，视频周围就变成「实心黑块」。
-      '.bpx-player-container, .bpx-player-video-area, .bpx-player-video-wrap, #bilibili-player, #playerWrap { background: transparent !important; }'
-    ].join('\n');
-    document.head.appendChild(st);
-  }
-
   function makeCanvas(host) {
     const c = document.createElement('canvas');
     c.id = 'ambi-mirror-canvas';
@@ -726,7 +706,6 @@ void main() {
     state.host = pickHost(video);
     if (!state.host) return;
 
-    ensureHeaderTransparent();
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
 
