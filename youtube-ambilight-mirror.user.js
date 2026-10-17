@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.8
+// @version      1.3.9
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -433,10 +433,15 @@ void main() {
       border: '0',
       background: 'transparent',
     });
-    // B 站：挂到 body（Vue 管不到的地方），z-index: 0 当背景层；
-    // #app 的背景由 attach 里改成透明，让光晕透上来。
+    // B 站：挂到 body（Vue 管不到的地方）并插在 body 的【最前面】。
+    // 关键：canvas 是 z-index:0，页面内容大多是 z-index:auto，两者同一层按 DOM 顺序排列，
+    // 所以必须让 canvas 排在 #app 之前，页面内容才会盖在光晕上面（否则光晕会盖住推荐栏）。
     // YouTube：直接叠在播放器最上层，画面本体在着色器里已 discard，不会挡住视频。
-    host.appendChild(c);
+    if (IS_BILIBILI && host === document.body) {
+      host.insertBefore(c, host.firstChild);
+    } else {
+      host.appendChild(c);
+    }
     return c;
   }
 
