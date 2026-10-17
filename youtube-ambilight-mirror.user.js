@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.4
+// @version      1.3.5
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -625,20 +625,49 @@ void main() {
       dctx.filter = 'none';
       dctx.globalCompositeOperation = 'source-over';
 
-      // B 站：右侧推荐列表的卡片背景是半透明的，光晕会透上去把封面和文字染糊。
-      // 在推荐区域把光晕渐隐掉，保证简介 / 评论区 / 推荐列表都是干净的。
+      // B 站：按 fork 的思路，光晕只保留「视频 + 周围一圈」，
+      // 其余区域整块擦掉 —— 这样简介、评论区、右侧推荐列表完全碰不到光晕。
       if (IS_BILIBILI) {
-        const recLeft = (L.dispX + L.dispW + 40) / Math.max(1, window.innerWidth) * out.width;
-        if (recLeft < out.width) {
-          const fade = Math.max(60, out.width * 0.06);
-          const g = dctx.createLinearGradient(recLeft, 0, Math.min(out.width, recLeft + fade), 0);
-          g.addColorStop(0, 'rgba(0,0,0,0)');
-          g.addColorStop(1, 'rgba(0,0,0,1)');
-          dctx.globalCompositeOperation = 'destination-out';
-          dctx.fillStyle = g;
-          dctx.fillRect(recLeft, 0, out.width - recLeft, out.height);
-          dctx.globalCompositeOperation = 'source-over';
-        }
+        const sx = out.width / Math.max(1, window.innerWidth);
+        const sy = out.height / Math.max(1, window.innerHeight);
+        // computeLayout 给的是归一化的 rectMinX/rectMinY，先还原成视口坐标
+        const screenX = L.rectMinX * window.innerWidth;
+        const screenY = L.rectMinY * window.innerHeight;
+        const m = Math.min(L.dispW, L.dispH) * 0.32;          // 光晕带宽 ≈ 画面短边 32%
+        const x0 = (screenX - m) * sx;
+        const x1 = (screenX + L.dispW + m) * sx;
+        const y0 = (screenY - m) * sy;
+        const y1 = (screenY + L.dispH + m) * sy;
+        const fx = Math.max(30, m * 0.45) * sx;
+        const fy = Math.max(30, m * 0.45) * sy;
+
+        dctx.globalCompositeOperation = 'destination-out';
+
+        let g = dctx.createLinearGradient(0, 0, x0 + fx, 0);
+        g.addColorStop(0, 'rgba(0,0,0,1)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        dctx.fillStyle = g;
+        dctx.fillRect(0, 0, Math.max(1, x0 + fx), out.height);
+
+        g = dctx.createLinearGradient(out.width, 0, Math.max(0, x1 - fx), 0);
+        g.addColorStop(0, 'rgba(0,0,0,1)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        dctx.fillStyle = g;
+        dctx.fillRect(Math.max(0, x1 - fx), 0, out.width - Math.max(0, x1 - fx), out.height);
+
+        g = dctx.createLinearGradient(0, 0, 0, y0 + fy);
+        g.addColorStop(0, 'rgba(0,0,0,1)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        dctx.fillStyle = g;
+        dctx.fillRect(0, 0, out.width, Math.max(1, y0 + fy));
+
+        g = dctx.createLinearGradient(0, out.height, 0, Math.max(0, y1 - fy));
+        g.addColorStop(0, 'rgba(0,0,0,1)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        dctx.fillStyle = g;
+        dctx.fillRect(0, Math.max(0, y1 - fy), out.width, out.height - Math.max(0, y1 - fy));
+
+        dctx.globalCompositeOperation = 'source-over';
       }
     }
   }
