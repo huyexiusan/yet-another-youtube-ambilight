@@ -78,12 +78,13 @@ dctx.fillRect(px + feather * 0.5, py + feather * 0.5, pw - feather, ph - feather
 
 ## 安装
 
-1. 浏览器安装 [Tampermonkey](https://www.tampermonkey.net/)
-2. 打开 Tampermonkey 管理面板 → 添加新脚本 → 把 `youtube-ambilight-mirror.user.js` 的内容粘进去 → `Ctrl+S`
-   （或者直接把 `.user.js` 拖进浏览器窗口）
+**一键安装**（先装好 [Tampermonkey](https://www.tampermonkey.net/)）：
 
-打开任意带 `<video>` 的页面，右下角出现 **◐** 按钮。点开调参，设置存在 `localStorage`。
+> 👉 **[安装脚本](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-mirror.user.js)**
 
+点开会自动弹出 Tampermonkey 的安装页，点「安装」即可。
+
+手动方式：把 `youtube-ambilight-mirror.user.js` 拖进浏览器窗口，或复制内容到 Tampermonkey「添加新脚本」里保存。
 ## 参数
 
 | 参数 | 默认 | 说明 |
