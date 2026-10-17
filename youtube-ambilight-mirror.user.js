@@ -1,9 +1,9 @@
-﻿// ==UserScript==
-// @name         YouTube 氛围灯 · 镜像反向采样版 (Ambilight Mirror)
-// @namespace    https://github.com/WesselKroos/youtube-ambilight
+// ==UserScript==
+// @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
+// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
 // @version      1.0.0
-// @description  复刻 YouTube Ambilight 的外扩光晕；把扩散出去的像素取色方式，从「边缘像素拉伸」改为「向内反向查找视频真实像素」（镜像延拓），消除边缘锯齿与色带。
-// @author       dsh
+// @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查，铺满整个视口，并用浏览器原生高斯模糊与画面边缘融合。
+// @author       huyexiusan
 // @match        *://*/*
 // @run-at       document-idle
 // @grant        none
@@ -14,24 +14,22 @@
  * 设计说明
  * ==================
  *
- * 原插件（Wessel Kroos / youtube-ambilight）的做法：
- *   1. 把每一帧视频当纹理上传，开启 mipmap，用 LINEAR_MIPMAP_LINEAR 采样；
- *   2. 把「视频矩形之外」的一圈像素，用超出 [0,1] 的 UV 去采样，
- *      纹理是 CLAMP_TO_EDGE，于是整圈光晕取到的都是「视频最外一行/一列像素」；
- *   3. 再叠一层 canvas 2D 的 filter: blur() 和 alpha 渐变。
+ * 复刻自 Wessel Kroos / youtube-ambilight，取色与合成方式做了几处改动。
  *
- * 本脚本的关键改动（用户要求）：
- *   光晕里每一个像素不再「直接拿边缘像素」，而是沿「由外向内的反方向」
- *   回走与它向外偏离相同的距离，去视频内部找真实像素（镜像延拓 / mirror padding）：
+ * 原版：光晕层画布比视频大 scale 倍，铺上放大后的整幅视频，
+ *        越界部分交给纹理 CLAMP_TO_EDGE，边缘像素被拉长成色带。
  *
- *       uv 在视频外 → 取 c = clamp(uv, 0, 1) 作最近边界点，
- *       反方向向量 dir = uv - c，回看点为 c - dir * lookback，
- *       再用三角波 fold() 折叠回 [0,1]（所以永远命中真实像素）。
+ * 本版：以画面中心为极点做极坐标取色 ——
+ *        光晕像素的极坐标是 (r, θ)，r 已超过该方向上的画面边界半径 rEdge，
+ *        反查时沿同一条半径（θ 不变）回到画面内部，取 r' = rEdge - (r - rEdge) 处的像素，
+ *        即「往外延展多远，就往画面里回查多远」，最多到中心。
  *
- *   好处：
- *     - 边缘处颜色连续（C0/C1 连续），不会出现一条被拉长的硬色带；
- *     - 光晕颜色随距离平滑变化，同一条边上的每个像素取到的内容都不同；
- *     - 不需要 mipmap 兜底，也就不会因为 mip 崩塌出现大色块。
+ *   另外：
+ *     - 画布铺满整个视口，光晕能一路漫到屏幕边缘；
+ *     - 透明度按到画面边界的欧氏距离归一化，四个角不会出现直角硬边；
+ *     - 模糊不在着色器里做，而是把画面与光晕一起交给 2D canvas 的 ctx.filter='blur()'，
+ *       再用「向内羽化」挖掉画面矩形，让视频边缘溶进光晕里；
+ *     - 全程 highp、不用 mipmap，避免原版 mip 崩塌和 lowp 量化引起的色块与台阶。
  */
 
 (function () {
@@ -526,7 +524,6 @@ void main() {
     gl.uniform2f(u.uRectMin, rectMinX, rectMinY);
     gl.uniform2f(u.uRectSize, rectSizeX, rectSizeY);
     gl.uniform1f(u.uExpand, expandHi);
-    if (!state.__ambiLog) { state.__ambiLog = 1; console.log('[ambi] rect=' + [rectMinX.toFixed(3), rectMinY.toFixed(3), rectSizeX.toFixed(3), rectSizeY.toFixed(3)].join(',') + ' expand=' + expandHi.toFixed(3) + ' canvas=' + L.cssW + 'x' + L.cssH); }
     gl.uniform1f(u.uAspect, L.vw / L.vh);
     gl.uniform1f(u.uBlur, (settings.blur / 100) * 0.34);
     gl.uniform1f(u.uLookback, clamp(settings.lookback, 0, 4));
@@ -831,7 +828,7 @@ void main() {
     panel.className = 'panel';
 
     const title = document.createElement('h3');
-    title.textContent = '氛围灯 · 镜像反向采样';
+    title.textContent = '氛围灯 · 径向反查';
     panel.appendChild(title);
 
     // 总开关
