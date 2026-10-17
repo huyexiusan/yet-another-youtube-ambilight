@@ -1,7 +1,7 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.6
+// @version      1.3.7
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -630,16 +630,19 @@ void main() {
       if (IS_BILIBILI) {
         const sx = out.width / Math.max(1, window.innerWidth);
         const sy = out.height / Math.max(1, window.innerHeight);
-        // computeLayout 给的是归一化的 rectMinX/rectMinY，先还原成视口坐标
+        // 光晕只保留在「播放器下方」这一条带里：
+        //   上方不铺（避开标题/简介），右侧不铺（避开推荐列表），左侧只留很窄。
+        // 视觉上就像光从播放器底下洇出去，页面其余部分完全干净。
         const screenX = L.rectMinX * window.innerWidth;
         const screenY = L.rectMinY * window.innerHeight;
-        const m = Math.min(L.dispW, L.dispH) * 0.32;          // 左/上/下的光晕带宽 ≈ 画面短边 32%
-        const x0 = (screenX - m) * sx;
-        const x1 = (screenX + L.dispW + 18) * sx;   // 右侧只留 18px：B 站推荐列表紧贴视频右边
-        const y0 = (screenY - m) * sy;
-        const y1 = (screenY + L.dispH + m) * sy;
-        const fx = Math.max(30, m * 0.45) * sx;
-        const fy = Math.max(30, m * 0.45) * sy;
+        const m = Math.min(L.dispW, L.dispH) * 0.55;          // 向下扩散的距离
+        const sideM = 40;                                      // 左右各留一点点
+        const x0 = (screenX - sideM) * sx;
+        const x1 = (screenX + L.dispW + sideM) * sx;
+        const y0 = (screenY + L.dispH - 8) * sy;               // 从画面底边开始
+        const y1 = (screenY + L.dispH + m) * sy;               // 往下扩散
+        const fx = Math.max(30, sideM * 0.9) * sx;
+        const fy = Math.max(20, m * 0.12) * sy;   // 上边沿的渐隐带要短，否则会把整条光晕擦没
 
         dctx.globalCompositeOperation = 'destination-out';
 
