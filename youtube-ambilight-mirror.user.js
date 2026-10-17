@@ -1,7 +1,7 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.11
+// @version      1.3.12
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -424,10 +424,11 @@ void main() {
     Object.assign(c.style, {
       position: 'fixed',
       pointerEvents: 'none',
-      // B 站：z-index:0 + 作为 body 的第一个子节点（见 makeCanvas 里的 insertBefore）。
-      // 试过 z-index:-1（tosya301 的写法），但 B 站的页面背景不是画在 body 上，
-      // 负层会被整个遮住，光晕完全看不见，所以退回 0。
-      zIndex: IS_BILIBILI ? '0' : '2147482000',
+      // B 站：负层。之所以能生效，是因为 attach() 里给 body 加了 isolation:isolate，
+      // 让 body 成为层叠上下文 —— 于是这个子元素画在「body 背景之上、页面内容之下」。
+      // （父级没有层叠上下文时，负层会穿到背景后面，光晕直接消失。）
+      // 取色逻辑本来就不用 DOM 顺序：页面内容都是 z-index:auto，天然盖在光晕上。
+      zIndex: IS_BILIBILI ? '-1' : '2147482000',
 
       display: 'none',
       borderRadius: '0',
@@ -739,7 +740,15 @@ void main() {
     if (!state.host) return;
 
     if (IS_BILIBILI) {
-      // 只改背景色，绝不动 #app 的子节点 —— 否则 B 站的 Vue 渲染会崩
+      // 参考 tosya301/ambient-light-for-bilibili 的三件套：
+      //   ① body 变成层叠上下文 → 光晕（z-index:-1）才会画在「body 背景之上、内容之下」
+      //   ② #app 背景透明          → 光晕能从下面透上来
+      //   ③ 页面内容 z-index:auto  → 天然盖在光晕上，不需要 DOM 顺序 / 遮罩 / 混合模式
+      // 只改样式属性，绝不动 #app 的子节点 —— 否则 B 站的 Vue 渲染会崩。
+      if (document.body && document.body.dataset.ambiIso !== '1') {
+        document.body.dataset.ambiIso = '1';
+        document.body.style.isolation = 'isolate';
+      }
       const app = document.querySelector('#app');
       if (app && app.dataset.ambiBg !== '1') {
         app.dataset.ambiBg = '1';
