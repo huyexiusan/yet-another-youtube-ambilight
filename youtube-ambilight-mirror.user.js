@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.1.3
+// @version      1.2.0
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -378,6 +378,10 @@ void main() {
       if (cs.position !== 'static' && !isClipped(cs)) return start;
       start = start.parentElement;
     }
+    // B 站：拿 #app 当宿主，光晕插进它的最前面当背景
+    if (IS_BILIBILI) {
+      return document.querySelector('#app') || document.querySelector('#mirror-vdcon')?.parentElement || document.body;
+    }
     // YouTube 专用兜底
     return document.querySelector('ytd-player') || document.querySelector('#player') || document.body;
   }
@@ -389,7 +393,7 @@ void main() {
     Object.assign(c.style, {
       position: 'fixed',
       pointerEvents: 'none',
-      zIndex: IS_BILIBILI ? '10' : '2147482000',
+      zIndex: IS_BILIBILI ? '0' : '2147482000',
       display: 'none',
       borderRadius: '0',
       margin: '0',
@@ -397,9 +401,14 @@ void main() {
       border: '0',
       background: 'transparent',
     });
-    // 必须叠在 <video> 之上：视频元素的黑边区域也要被光晕染色，
-    // 画面本体在着色器里已经 discard 掉了，所以不会挡住视频。
-    host.appendChild(c);
+    // B 站：光晕当页面背景用 —— 插到 #app 最前面 + z-index: 0，
+    // 这样它位于页面背景之上、所有内容（标题 / 推荐 / 控制栏）之下，永远不会挡住文字。
+    // YouTube：叠在最上层，画面本体在着色器里已 discard，不会挡住视频。
+    if (IS_BILIBILI) {
+      host.insertBefore(c, host.firstChild);
+    } else {
+      host.appendChild(c);
+    }
     return c;
   }
 
@@ -548,10 +557,11 @@ void main() {
 
     const u = state.u;
     // 光晕衰减范围（以画面高度为单位）：
-    //   YouTube 用视口短边，铺满全屏；
-    //   B 站用画面短边，避免糊住标题 / 推荐列表 / 评论。
+    //   YouTube：用视口短边，铺满全屏；
+    //   B 站：参考原版几何，只贴在播放器周围（视频短边的 18%），
+    //         不做全屏扩散，否则一定会盖住标题 / 推荐列表 / 评论。
     const expandPx = Math.max(1, IS_BILIBILI
-      ? Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100 * (isDarkPage() ? 1 : 0.18)
+      ? Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100
       : Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
     const expandHi = expandPx / L.dispH;
 
