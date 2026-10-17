@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.1.1
+// @version      1.1.2
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -45,6 +45,26 @@
   const LS_KEY = 'ambi_mirror_settings_v1';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
+
+  // 页面背景是不是深色（B 站暗夜模式 / 影院模式）。深色底用普通混合才能"发光"，
+  // 浅色底用 multiply 才不会把文字糊成一片。
+  let __darkBgCache = null;
+  let __darkBgTs = 0;
+  function isDarkPage() {
+    const now = performance.now();
+    if (__darkBgCache !== null && now - __darkBgTs < 1500) return __darkBgCache;
+    let dark = false;
+    try {
+      const bg = getComputedStyle(document.body).backgroundColor || '';
+      const m = bg.match(/\d+(\.\d+)?/g);
+      if (m && m.length >= 3) {
+        dark = 0.299 * +m[0] + 0.587 * +m[1] + 0.114 * +m[2] < 90;
+      }
+    } catch (e) { /* ignore */ }
+    __darkBgCache = dark;
+    __darkBgTs = now;
+    return dark;
+  }
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const num = (v, d) => (Number.isFinite(+v) ? +v : d);
 
@@ -370,7 +390,6 @@ void main() {
       position: 'fixed',
       pointerEvents: 'none',
       zIndex: IS_BILIBILI ? '10' : '2147482000',
-      mixBlendMode: IS_BILIBILI ? 'multiply' : 'normal',
       display: 'none',
       borderRadius: '0',
       margin: '0',
@@ -532,7 +551,7 @@ void main() {
     //   YouTube 用视口短边，铺满全屏；
     //   B 站用画面短边，避免糊住标题 / 推荐列表 / 评论。
     const expandPx = Math.max(1, IS_BILIBILI
-      ? Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100 * 0.75
+      ? Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100 * (isDarkPage() ? 1 : 0.75)
       : Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
     const expandHi = expandPx / L.dispH;
 
@@ -561,6 +580,12 @@ void main() {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // B 站：深色主题用普通混合（发光），浅色主题用 multiply（染色不糊字）
+    if (IS_BILIBILI && state.canvas) {
+      const mode = isDarkPage() ? 'normal' : 'multiply';
+      if (state.canvas.style.mixBlendMode !== mode) state.canvas.style.mixBlendMode = mode;
+    }
 
     // —— 浏览器原生高斯模糊（参考原版：2D canvas + ctx.filter）
     const dctx = state.dctx;
