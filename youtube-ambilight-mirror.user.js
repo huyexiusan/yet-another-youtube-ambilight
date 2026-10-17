@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.2
+// @version      1.3.3
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -361,12 +361,12 @@ void main() {
       return fs;
     }
 
-    // B 站（非全屏）：光晕当页面背景用 —— 宿主固定为 #app。
-    // 必须在这里就返回，否则会被下面「往上找已定位容器」的逻辑先截胡（那就变成播放器容器了）。
+    // B 站（非全屏）：光晕挂到 body 上。
+    // 【关键】绝不能挂进 #app —— 那是 B 站 Vue 的挂载容器，塞外部节点进去会让它的
+    // patch 拿到错误节点（setAttribute is not a function / HierarchyRequestError），
+    // 整页渲染崩溃，评论区、头像、推荐封面全部出不来。
     if (IS_BILIBILI) {
-      return document.querySelector('#app')
-        || document.querySelector('#mirror-vdcon')?.parentElement
-        || document.body;
+      return document.body;
     }
 
     let el = video.parentElement;
@@ -408,14 +408,10 @@ void main() {
       border: '0',
       background: 'transparent',
     });
-    // B 站：光晕当页面背景用 —— 插到 #app 最前面 + z-index: 0，
-    // 这样它位于页面背景之上、所有内容（标题 / 推荐 / 控制栏）之下，永远不会挡住文字。
-    // YouTube：叠在最上层，画面本体在着色器里已 discard，不会挡住视频。
-    if (IS_BILIBILI && host.id === 'app') {
-      host.insertBefore(c, host.firstChild);   // 页面背景层：在所有内容之下
-    } else {
-      host.appendChild(c);                    // 全屏 / YouTube：叠在最上层
-    }
+    // B 站：挂到 body（Vue 管不到的地方），z-index: 0 当背景层；
+    // #app 的背景由 attach 里改成透明，让光晕透上来。
+    // YouTube：直接叠在播放器最上层，画面本体在着色器里已 discard，不会挡住视频。
+    host.appendChild(c);
     return c;
   }
 
@@ -706,6 +702,14 @@ void main() {
     state.host = pickHost(video);
     if (!state.host) return;
 
+    if (IS_BILIBILI) {
+      // 只改背景色，绝不动 #app 的子节点 —— 否则 B 站的 Vue 渲染会崩
+      const app = document.querySelector('#app');
+      if (app && app.dataset.ambiBg !== '1') {
+        app.dataset.ambiBg = '1';
+        app.style.background = 'transparent';
+      }
+    }
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
 
