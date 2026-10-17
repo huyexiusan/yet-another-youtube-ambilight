@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.0.2
+// @version      1.0.3
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查，铺满整个视口，并用浏览器原生高斯模糊与画面边缘融合。
 // @author       huyexiusan
 // @match        *://*/*
@@ -477,16 +477,19 @@ void main() {
 
   function uploadFrame(gl) {
     const v = state.video;
-    if (!v || v.readyState < 2 || !state.texW) return;
+    if (!v || v.readyState < 2 || !state.texW || !state.offCtx) return;
     try {
       state.offCtx.drawImage(v, 0, 0, state.texW, state.texH);
       gl.bindTexture(gl.TEXTURE_2D, state.tex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, state.off);
       state.lastVideoTime = v.currentTime;
     } catch (err) {
-      // 跨域视频会污染 canvas，此时无法读取像素
-      state.blocked = true;
-      setStatus('该视频受跨域限制，无法读取画面');
+      // 只有真正的跨域污染才停用；视频尚未就绪之类的错误下一帧重试即可
+      const msg = String((err && (err.name + ' ' + err.message)) || err);
+      if (/security|tainted|cross-origin/i.test(msg)) {
+        state.blocked = true;
+        setStatus('该视频受跨域限制，无法读取画面');
+      }
     }
   }
 
@@ -1041,8 +1044,14 @@ void main() {
     setInterval(() => {
       if (!settings.enabled) return;
       const v = findVideo();
-      if (v && v !== state.video) attach(v);
-    }, 2500);
+      if (v && v !== state.video) { attach(v); return; }
+      // 页面刷新 / SPA 重排时，承载画布的宿主可能被整棵替换掉：
+      // 画布已脱离文档，或者宿主已经不在文档里，就重建一次。
+      if (state.started && state.canvas && (!document.contains(state.canvas) || !state.host || !document.contains(state.host))) {
+        deinit();
+        bootstrap(true);
+      }
+    }, 2000);
   }
 
   if (document.readyState === 'loading') {
