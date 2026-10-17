@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.0.3
+// @version      1.0.4
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查，铺满整个视口，并用浏览器原生高斯模糊与画面边缘融合。
 // @author       huyexiusan
 // @match        *://*/*
@@ -430,11 +430,20 @@ void main() {
     if (state.lastRect === posKey) return;
     state.lastRect = posKey;
 
+    // 从隐藏变显示时淡入，避免刷新后光晕「啪」地跳出来
+    const wasHidden = c.style.display !== 'block';
+
     c.style.display = 'block';
     c.style.left = '0px';
     c.style.top = '0px';
     c.style.width = L.cssW + 'px';
     c.style.height = L.cssH + 'px';
+
+    if (wasHidden) {
+      c.style.transition = 'opacity .25s ease';
+      c.style.opacity = '0';
+      requestAnimationFrame(() => { c.style.opacity = '1'; });
+    }
 
     if (c.width !== cw || c.height !== ch) {
       c.width = cw;
@@ -1051,7 +1060,7 @@ void main() {
         deinit();
         bootstrap(true);
       }
-    }, 2000);
+    }, 800);
   }
 
   if (document.readyState === 'loading') {
