@@ -1,11 +1,13 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.2.0
+// @version      1.2.1
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
 // @run-at       document-idle
+// @downloadURL  https://cdn.jsdelivr.net/gh/huyexiusan/yet-another-youtube-ambilight@latest/youtube-ambilight-mirror.user.js
+// @updateURL    https://cdn.jsdelivr.net/gh/huyexiusan/yet-another-youtube-ambilight@latest/youtube-ambilight-mirror.user.js
 // @grant        none
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMxYTFhMWEiLz48cmVjdCB4PSIyMCIgeT0iMjAiIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgcng9IjMiIGZpbGw9IiNmZmYiLz48L3N2Zz4=
 // ==/UserScript==
