@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.7
+// @version      1.3.8
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -392,6 +392,31 @@ void main() {
     return document.querySelector('ytd-player') || document.querySelector('#player') || document.body;
   }
 
+  /**
+   * B 站右侧推荐栏（.right-container 等）的背景是透明的，
+   * 铺满页面的光晕会从下面透上来把封面染糊。
+   * 这里只给它们加一层「与页面背景同色」的不透明底色，
+   * 相当于让推荐栏真的盖在光晕上面。只改 background，不碰节点结构。
+   */
+  function ensureSidebarOpaque() {
+    if (!IS_BILIBILI) return;
+    const pageBg = (() => {
+      try {
+        const c = getComputedStyle(document.body).backgroundColor;
+        if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c;
+      } catch (e) { /* ignore */ }
+      return '#ffffff';
+    })();
+    ['.right-container', '.right-container-inner', '.rcmd-tab',
+     '.recommend-list-v1', '.rec-list'].forEach((sel) => {
+      document.querySelectorAll(sel).forEach((el) => {
+        if (el.dataset.ambiOpaque === '1') return;
+        el.dataset.ambiOpaque = '1';
+        el.style.background = pageBg;
+      });
+    });
+  }
+
   function makeCanvas(host) {
     const c = document.createElement('canvas');
     c.id = 'ambi-mirror-canvas';
@@ -625,53 +650,8 @@ void main() {
       dctx.filter = 'none';
       dctx.globalCompositeOperation = 'source-over';
 
-      // B 站：按 fork 的思路，光晕只保留「视频 + 周围一圈」，
-      // 其余区域整块擦掉 —— 这样简介、评论区、右侧推荐列表完全碰不到光晕。
-      if (IS_BILIBILI) {
-        const sx = out.width / Math.max(1, window.innerWidth);
-        const sy = out.height / Math.max(1, window.innerHeight);
-        // 光晕只保留在「播放器下方」这一条带里：
-        //   上方不铺（避开标题/简介），右侧不铺（避开推荐列表），左侧只留很窄。
-        // 视觉上就像光从播放器底下洇出去，页面其余部分完全干净。
-        const screenX = L.rectMinX * window.innerWidth;
-        const screenY = L.rectMinY * window.innerHeight;
-        const m = Math.min(L.dispW, L.dispH) * 0.55;          // 向下扩散的距离
-        const sideM = 40;                                      // 左右各留一点点
-        const x0 = (screenX - sideM) * sx;
-        const x1 = (screenX + L.dispW + sideM) * sx;
-        const y0 = (screenY + L.dispH - 8) * sy;               // 从画面底边开始
-        const y1 = (screenY + L.dispH + m) * sy;               // 往下扩散
-        const fx = Math.max(30, sideM * 0.9) * sx;
-        const fy = Math.max(20, m * 0.12) * sy;   // 上边沿的渐隐带要短，否则会把整条光晕擦没
-
-        dctx.globalCompositeOperation = 'destination-out';
-
-        let g = dctx.createLinearGradient(0, 0, x0 + fx, 0);
-        g.addColorStop(0, 'rgba(0,0,0,1)');
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        dctx.fillStyle = g;
-        dctx.fillRect(0, 0, Math.max(1, x0 + fx), out.height);
-
-        g = dctx.createLinearGradient(out.width, 0, Math.max(0, x1 - fx), 0);
-        g.addColorStop(0, 'rgba(0,0,0,1)');
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        dctx.fillStyle = g;
-        dctx.fillRect(Math.max(0, x1 - fx), 0, out.width - Math.max(0, x1 - fx), out.height);
-
-        g = dctx.createLinearGradient(0, 0, 0, y0 + fy);
-        g.addColorStop(0, 'rgba(0,0,0,1)');
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        dctx.fillStyle = g;
-        dctx.fillRect(0, 0, out.width, Math.max(1, y0 + fy));
-
-        g = dctx.createLinearGradient(0, out.height, 0, Math.max(0, y1 - fy));
-        g.addColorStop(0, 'rgba(0,0,0,1)');
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        dctx.fillStyle = g;
-        dctx.fillRect(0, Math.max(0, y1 - fy), out.width, out.height - Math.max(0, y1 - fy));
-
-        dctx.globalCompositeOperation = 'source-over';
-      }
+      // B 站：光晕照常铺满整页，不再做任何裁剪。
+      // 右侧推荐栏由 attach() 里加的「不透明背景」盖住光晕（见 ensureSidebarOpaque）。
     }
   }
 
@@ -757,6 +737,7 @@ void main() {
         app.dataset.ambiBg = '1';
         app.style.background = 'transparent';
       }
+      ensureSidebarOpaque();
     }
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
