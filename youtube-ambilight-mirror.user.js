@@ -1,8 +1,8 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.0.4
-// @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查，铺满整个视口，并用浏览器原生高斯模糊与画面边缘融合。
+// @version      1.1.0
+// @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
 // @run-at       document-idle
@@ -43,6 +43,8 @@
   window[BOOT_FLAG] = true;
 
   const LS_KEY = 'ambi_mirror_settings_v1';
+  // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
+  const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const num = (v, d) => (Number.isFinite(+v) ? +v : d);
 
@@ -367,7 +369,7 @@ void main() {
     Object.assign(c.style, {
       position: 'fixed',
       pointerEvents: 'none',
-      zIndex: '2147482000',
+      zIndex: IS_BILIBILI ? '10' : '2147482000',
       display: 'none',
       borderRadius: '0',
       margin: '0',
@@ -525,8 +527,12 @@ void main() {
     gl.bindTexture(gl.TEXTURE_2D, state.tex);
 
     const u = state.u;
-    // 光晕衰减范围：以画面高度为单位（默认扩散到视口短边的 120%）
-    const expandPx = Math.max(1, Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
+    // 光晕衰减范围（以画面高度为单位）：
+    //   YouTube 用视口短边，铺满全屏；
+    //   B 站用画面短边，避免糊住标题 / 推荐列表 / 评论。
+    const expandPx = Math.max(1, IS_BILIBILI
+      ? Math.min(L.dispW, L.dispH) * 0.16          // B 站：只扩散到画面短边的 16%，别糊到文字
+      : Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
     const expandHi = expandPx / L.dispH;
 
     const rectMinX = L.rectMinX;
@@ -1000,6 +1006,15 @@ void main() {
    * 6. 启动
    * ========================================================================= */
   function findVideo() {
+    // B 站：优先使用 bpx 播放器里的 video；旧版 bwp-video 是 closed shadow root，读不到帧
+    if (IS_BILIBILI) {
+      const v = document.querySelector('.bpx-player-video-area video')
+        || document.querySelector('.bpx-player-video-wrap video')
+        || document.querySelector('.bpx-player-container video');
+      if (v && v.tagName === 'BWP-VIDEO') return null;
+      if (v) return v;
+    }
+
     const candidates = Array.from(document.querySelectorAll('video'));
     let best = null;
     let bestArea = 0;
