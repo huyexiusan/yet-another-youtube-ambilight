@@ -834,7 +834,11 @@ void main() {
     // 总开关
     const swRow = document.createElement('div');
     swRow.className = 'row';
-    swRow.innerHTML = '<label style="font-weight:600;color:#e8e8ea">启用</label>';
+    // 注意：YouTube 开启了 Trusted Types，不能给 innerHTML 赋字符串，这里全部用 DOM API
+    const swLabel = document.createElement('label');
+    swLabel.textContent = '启用';
+    swLabel.style.cssText = 'font-weight:600;color:#e8e8ea';
+    swRow.appendChild(swLabel);
     const sw = document.createElement('div');
     sw.className = 'switch';
     const cb = document.createElement('input');
@@ -851,7 +855,11 @@ void main() {
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.innerHTML = '以画面中心为极点沿半径反查：光晕<b>往外延展多少，就往画面里回查多少（1:1）</b>，贴着画面处取边界色。';
+    hint.textContent = '以画面中心为极点沿半径反查：光晕';
+    const hintStrong = document.createElement('b');
+    hintStrong.textContent = '往外延展多少，就往画面里回查多少（1:1）';
+    hint.appendChild(hintStrong);
+    hint.appendChild(document.createTextNode('，贴着画面处取边界色。'));
     panel.appendChild(hint);
 
     // 采样方式
