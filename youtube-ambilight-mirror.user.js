@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.1.2
+// @version      1.1.3
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -551,7 +551,7 @@ void main() {
     //   YouTube 用视口短边，铺满全屏；
     //   B 站用画面短边，避免糊住标题 / 推荐列表 / 评论。
     const expandPx = Math.max(1, IS_BILIBILI
-      ? Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100 * (isDarkPage() ? 1 : 0.75)
+      ? Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100 * (isDarkPage() ? 1 : 0.18)
       : Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
     const expandHi = expandPx / L.dispH;
 
@@ -581,11 +581,8 @@ void main() {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    // B 站：深色主题用普通混合（发光），浅色主题用 multiply（染色不糊字）
-    if (IS_BILIBILI && state.canvas) {
-      const mode = isDarkPage() ? 'normal' : 'multiply';
-      if (state.canvas.style.mixBlendMode !== mode) state.canvas.style.mixBlendMode = mode;
-    }
+    // B 站：混合模式固定为普通叠加（不用 multiply，避免把页面压暗）；
+    // 浅色页面靠收窄扩散范围来避免糊住文字，见下面的 expandPx。
 
     // —— 浏览器原生高斯模糊（参考原版：2D canvas + ctx.filter）
     const dctx = state.dctx;
