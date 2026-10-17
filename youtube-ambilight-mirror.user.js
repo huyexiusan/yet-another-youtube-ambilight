@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.0
+// @version      1.3.1
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -624,104 +624,31 @@ void main() {
     // —— 浏览器原生高斯模糊（参考原版：2D canvas + ctx.filter）
     const dctx = state.dctx;
     const out = state.canvas;
-    // 原版公式：blurPx = blur2 * (height / 512) * 1.275
-    const blurPx = settings.blur * (state.ch / 512) * 1.275;
     if (dctx && out) {
+      // 原版公式：blurPx = blur2 * (height / 512) * 1.275
+      const blurPx = settings.blur * (state.ch / 512) * 1.275;
       dctx.filter = blurPx > 0.5 ? 'blur(' + blurPx.toFixed(2) + 'px)' : 'none';
       dctx.clearRect(0, 0, out.width, out.height);
       dctx.drawImage(state.glCanvas, 0, 0, out.width, out.height);
       dctx.filter = 'none';
 
-      // 背景层（B 站）不挖洞：它整块在页面内容之下，视频本来就盖着它。
-      if (!IS_BILIBILI) {
-        // 把画面区域挖掉，露出上面的 <video>；这样光晕只留在画面之外，边缘不会被压暗
-        const px = rectMinX * out.width;
-        const py = rectMinY * out.height;
-        const pw = rectSizeX * out.width;
-        const ph = rectSizeY * out.height;
-        // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
-        // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
-        const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
-        dctx.globalCompositeOperation = 'destination-out';
-        dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
-        dctx.fillStyle = '#000';
-        dctx.fillRect(px + feather * 0.5, py + feather * 0.5,
-                      Math.max(1, pw - feather), Math.max(1, ph - feather));
-        dctx.filter = 'none';
-        dctx.globalCompositeOperation = 'source-over';
-      }
+      // 把画面区域挖掉，露出上面的 <video>；这样光晕只留在画面之外，边缘不会被压暗
+      const px = rectMinX * out.width;
+      const py = rectMinY * out.height;
+      const pw = rectSizeX * out.width;
+      const ph = rectSizeY * out.height;
+      // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
+      // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
+      // 溶解宽度 = 模糊半径，但最多吃掉画面短边的 12%，避免大模糊时画面被吞掉
+      const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
+      dctx.globalCompositeOperation = 'destination-out';
+      dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
+      dctx.fillStyle = '#000';
+      dctx.fillRect(px + feather * 0.5, py + feather * 0.5,
+                    Math.max(1, pw - feather), Math.max(1, ph - feather));
+      dctx.filter = 'none';
+      dctx.globalCompositeOperation = 'source-over';
     }
-
-    // —— 边缘层（仅 B 站）：视频周围一圈，负责把视频边缘溶进光晕
-    if (IS_BILIBILI) drawEdgeLayer(blurPx);
-  }
-
-  /**
-   * 边缘层：从已渲染的 glCanvas 里裁出「视频 + 一圈」的区域，
-   * 模糊后挖掉画面矩形（向内羽化），叠在视频之上 —— 就会出现视频边缘化进光晕的过渡。
-   */
-  function drawEdgeLayer(blurPx) {
-    const ec = state.edgeCanvas;
-    const ectx = state.edgeCtx;
-    const out = state.canvas;
-    if (!ec || !ectx || !out) return;
-
-    const cssW = parseFloat(out.style.width) || window.innerWidth;
-    // 边缘带的宽度：够熔化视频边缘即可，太宽会把旁边的推荐列表 / 标题也糊上
-    const m = Math.max(20, Math.min(46, blurPx * 2.2));
-    // 用 <video> 自己的视口矩形定位（最可靠），画面区域再按 contain 居中修正
-    const L = computeLayout();
-    if (!L || !state.video) return;
-    const vr = state.video.getBoundingClientRect();
-    if (!vr.width || !vr.height) return;
-    const vx = vr.left - m;
-    const vy = vr.top - m;
-    const vw2 = Math.ceil(vr.width + m * 2);
-    const vh2 = Math.ceil(vr.height + m * 2);
-    if (vw2 < 8 || vh2 < 8) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const needW = Math.round(vw2 * dpr);
-    const needH = Math.round(vh2 * dpr);
-    if (ec.width !== needW || ec.height !== needH) { ec.width = needW; ec.height = needH; }
-    ec.style.display = 'block';
-    ec.style.opacity = '1';
-    ec.style.left = vx + 'px';
-    ec.style.top = vy + 'px';
-    ec.style.width = vw2 + 'px';
-    ec.style.height = vh2 + 'px';
-    ec.style.zIndex = '15';   // 高于视频、低于顶栏(1002)与控制栏
-
-    // glCanvas 是全屏尺寸，把对应区域裁过来
-    const glW = state.glCanvas.width;
-    const glH = state.glCanvas.height;
-    const sx = (vx / Math.max(1, window.innerWidth)) * glW;
-    const sy = (vy / Math.max(1, window.innerHeight)) * glH;
-    const sw = (vw2 / Math.max(1, window.innerWidth)) * glW;
-    const sh = (vh2 / Math.max(1, window.innerHeight)) * glH;
-
-    ectx.setTransform(1, 0, 0, 1, 0, 0);
-    ectx.filter = blurPx > 0.5 ? 'blur(' + blurPx.toFixed(2) + 'px)' : 'none';
-    ectx.clearRect(0, 0, ec.width, ec.height);
-    ectx.drawImage(state.glCanvas, sx, sy, sw, sh, 0, 0, ec.width, ec.height);
-    ectx.filter = 'none';
-
-    // 挖掉画面矩形：先内缩 feather/2，再模糊 feather/2 —— 边缘正好从画面边界向内渐强
-    // 画面在 <video> 里可能是 object-fit: contain，居中留黑边，所以要加上这段偏移
-    const innerX = (vr.width - L.dispW) / 2;
-    const innerY = (vr.height - L.dispH) / 2;
-    const pw = (L.dispW / vw2) * ec.width;
-    const ph = (L.dispH / vh2) * ec.height;
-    const ox = ((m + innerX) / vw2) * ec.width;
-    const oy = ((m + innerY) / vh2) * ec.height;
-    const feather = Math.max(1, Math.min(blurPx * dpr, Math.min(pw, ph) * 0.12));
-    ectx.globalCompositeOperation = 'destination-out';
-    ectx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
-    ectx.fillStyle = '#000';
-    ectx.fillRect(ox + feather * 0.5, oy + feather * 0.5,
-                  Math.max(1, pw - feather), Math.max(1, ph - feather));
-    ectx.filter = 'none';
-    ectx.globalCompositeOperation = 'source-over';
   }
 
   function tick(ts) {
@@ -802,19 +729,6 @@ void main() {
     ensureHeaderTransparent();
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
-
-    // 双层方案（B 站）：
-    //   层 B（上面这张）：铺满页面的背景光晕，永远在内容之下，不挖洞；
-    //   层 E（这张）：只在视频周围一小圈，负责「挖洞 + 向内羽化」，
-    //                让视频边缘溶进光晕 —— 它叠在视频之上，所以才能做溶解。
-    if (IS_BILIBILI) {
-      state.edgeCanvas = document.createElement('canvas');
-      state.edgeCanvas.id = 'ambi-mirror-edge';
-      state.edgeCanvas.style.cssText = 'position:fixed;left:0;top:0;margin:0;padding:0;border:0;pointer-events:none;display:none;';
-      // 挂到 body 上：挂在 #app 内部时，祖先的 transform 会改变 position:fixed 的参照物
-      (document.body || document.documentElement).appendChild(state.edgeCanvas);
-      state.edgeCtx = state.edgeCanvas.getContext('2d', { alpha: true, desynchronized: true });
-    }
 
     // WebGL 渲染到一张离屏画布，再由 2D 层用 ctx.filter='blur()' 做浏览器原生高斯模糊
     // （和原版一致：不在着色器里多 tap 采样，所以完全没有颗粒噪点）
