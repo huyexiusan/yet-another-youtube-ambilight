@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.0.1
+// @version      1.0.2
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查，铺满整个视口，并用浏览器原生高斯模糊与画面边缘融合。
 // @author       huyexiusan
 // @match        *://*/*
@@ -271,6 +271,7 @@ void main() {
     rafId: 0,
     ro: null,
     lastDrawTs: 0,
+    lastPausedDrawTs: 0,
     lastVideoTime: -1,
     needDraw: true,
     blocked: false,     // 跨域污染等不可用状态
@@ -497,6 +498,7 @@ void main() {
     const L = computeLayout();
     if (!L || L.dispW < 8 || L.dispH < 8) {
       if (state.canvas) state.canvas.style.display = 'none';
+      state.needDraw = true;   // 布局还没就绪，下一轮继续尝试
       return;
     }
     applyLayout(L);
@@ -578,11 +580,19 @@ void main() {
     if (state.blocked) return;
 
     const v = state.video;
-    if (!v.videoWidth) return;
+    if (!v.videoWidth) {
+      // 元数据还没来（刚打开视频页），稍后重试
+      state.needDraw = true;
+      return;
+    }
 
     if (v.paused || v.ended) {
-      // 暂停时只需要画一次（尺寸变化或拖动进度条时会置位）
-      if (state.needDraw) { state.needDraw = false; draw(); }
+      // 暂停时低频重绘：既响应尺寸/位置变化，也能在视频还没布局好时自动补画
+      if (state.needDraw && ts - state.lastPausedDrawTs > 300) {
+        state.needDraw = false;
+        state.lastPausedDrawTs = ts;
+        draw();
+      }
       return;
     }
 
@@ -629,7 +639,9 @@ void main() {
   }
 
   function attach(video) {
-    if (!video || state.video === video) return;
+    if (!video) return;
+    // 只有「同一个 video 且已经成功启动」才跳过；启动失败过就允许重试
+    if (state.video === video && state.started) return;
     deinit();
 
     state.video = video;
