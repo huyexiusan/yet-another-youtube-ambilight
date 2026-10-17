@@ -1,5 +1,7 @@
 # YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 
+> 中文 | [English](README.en.md)
+
 > Yet another take on YouTube ambient light —— 把外扩光晕的取色改成「沿半径反向回查画面内部」，并铺满整个屏幕。
 
 给视频加一圈"从画面中心向外扩散"的氛围光晕，颜色不是取自被拉长的边缘像素，而是**沿半径回到画面内部回查**得到的真实像素。
