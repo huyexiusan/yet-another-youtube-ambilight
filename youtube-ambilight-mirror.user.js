@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.22
+// @version      1.3.23
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -700,7 +700,7 @@ bili-comment-pictures-upload {
     }
   }
 
-  function draw() {
+  function draw(skipUpload) {
     const gl = state.gl;
     const v = state.video;
     if (!gl || !v || state.blocked) return;
@@ -714,7 +714,8 @@ bili-comment-pictures-upload {
     applyLayout(L);
 
     ensureTexture(gl, L.vw, L.vh);
-    uploadFrame(gl);
+    // 滚动补画时画面没变，跳过帧上传，只重算布局 + 重新合成
+    if (!skipUpload) uploadFrame(gl);
 
     if (!state.cw || !state.ch) return;
     gl.viewport(0, 0, state.cw, state.ch);
@@ -963,7 +964,19 @@ bili-comment-pictures-upload {
   }
 
   window.addEventListener('resize', () => { state.lastRect = null; state.needDraw = true; }, { passive: true });
-  window.addEventListener('scroll', () => { state.lastRect = null; state.needDraw = true; }, { passive: true, capture: true });
+  // 滚动时立即重算布局；视频暂停时 tick 的重绘是 300ms 一次的，不补画会明显"慢半拍"
+  let scrollRafPending = false;
+  window.addEventListener('scroll', () => {
+    state.lastRect = null;
+    state.needDraw = true;
+    if (scrollRafPending) return;
+    scrollRafPending = true;
+    requestAnimationFrame(() => {
+      scrollRafPending = false;
+      if (!state.started || !state.video) return;
+      if (state.video.paused || state.video.ended) draw(true);   // 跳过帧上传，只重画位置
+    });
+  }, { passive: true, capture: true });
   document.addEventListener('fullscreenchange', () => {
     // 全屏时只渲染全屏元素内部，需要把画布挪进全屏容器
     const fsEl = document.fullscreenElement;
