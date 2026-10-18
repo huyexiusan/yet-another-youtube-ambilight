@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.18
+// @version      1.3.19
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -414,65 +414,106 @@ void main() {
    * 让光晕能像氛围光一样透出来。
    * 纯 CSS 注入：只改 background / box-shadow，不碰 DOM 结构，不影响 Vue。
    */
-  const BILI_SURFACE_CSS = [
-    '.bpx-player-sending-area',
-    '.bpx-player-sending-bar',
-    '.bpx-player-sending-bar-left',
-    '.bpx-player-sending-bar-right',
-    '.bpx-player-video-info',
-    '.bpx-player-dm-root',
-    '.bpx-player-dm-input',
-    '.bpx-player-dm-switch',
-    '.bpx-player-dm-setting',
-    '.bpx-player-dm-wrap',
-    '.bpx-player-dm-wrap-child',
-    '.bpx-player-dm-btn-send',
-    '.bpx-player-dm-btn-footer',
-    '.bpx-player-dm-btn-history',
-    '.bpx-player-dm-management',
-    '.bpx-player-dm-function',
-    '.bpx-player-dm-load-status',
-    '.bpx-player-video-inputbar',
-    '.bpx-player-video-inputbar-wrap',
-    '.bpx-player-sending-area::before',
-    '.bpx-player-sending-area::after',
-    '#danmukuBox',
-    '.danmaku-wrap',
-    '.danmaku-box',
-    '.bpx-docker-minor',
-    '.bpx-player-auxiliary',
-    '.bpx-player-collapse',
-    '.bpx-player-collapse .bui-collapse-header',
-    '.bpx-player-collapse .bui-collapse-body',
-    '.bpx-player-viewpoint',
-    '.bpx-player-viewpoint-body',
-    '.bpx-player-video-area',
-    '.bpx-player-video-perch',
-    '.bpx-player-video-wrap',
-    // 发送区内部的 div（用户实测：这条路径下还有一层实色背景，光晕透不上来）
-    '.bpx-player-sending-area > div',
-    '.bpx-player-sending-area > div > div',
-    '.bpx-player-primary-area .bpx-player-sending-area',
-  ].join(',\n') + ' {\n' +
-    '  background: transparent !important;\n' +
-    '  box-shadow: none !important;\n' +
-    '}\n' +
-    // 视频选集菜单原来是 rgba(20,20,20,.9) 的近实心黑，改成半透明 + 毛玻璃，
-    // 光晕能透上来，文字靠一层轻模糊保持可读。
-    '.bpx-player-ctrl-eplist-menu-wrap,\n' +
-    '.bpx-player-ctrl-eplist-menu,\n' +
-    // 弹幕设置面板同样是 rgba(20,20,20,.9) 的近实心黑。
-    // 注意：只改「面板容器」，下面的 bui-progress-* / bui-switch-* / bui-radio-* /
-    // bui-button-* 都是控件本身，改透明会让进度条和按钮消失，所以一律不动。
-    '.bpx-player-dm-setting-box,\n' +
-    '.bpx-player-dm-setting-box .bui-panel,\n' +
-    '.bpx-player-dm-setting-left-block-add,\n' +
-    '.bpx-player-dm-setting-left-block-sync,\n' +
-    '.bpx-player-dm-setting-left-dmDensity {\n' +
-    '  background: rgba(10, 10, 12, 0.18) !important;\n' +
-    '  -webkit-backdrop-filter: blur(16px);\n' +
-    '  backdrop-filter: blur(16px);\n' +
-    '}\n';
+  const BILI_SURFACE_CSS = `
+/* ── 播放器周边面板：背景透明化，让背后光晕透出 ── */
+.bpx-player-video-area,
+.bpx-player-video-perch,
+.bpx-player-video-wrap,
+.bpx-player-sending-area,
+.bpx-player-sending-bar,
+.bpx-player-sending-bar-left,
+.bpx-player-sending-bar-right,
+.bpx-player-video-info,
+.bpx-player-sending-area::before,
+.bpx-player-sending-area::after,
+.bpx-player-sending-area > div,
+.bpx-player-sending-area > div > div,
+.bpx-player-primary-area .bpx-player-sending-area,
+.bpx-player-sending-area .bui-button-blue,
+.bpx-player-dm-root,
+.bpx-player-dm-input,
+.bpx-player-dm-switch,
+.bpx-player-dm-setting,
+.bpx-player-dm-wrap,
+.bpx-player-dm-wrap-child,
+.bpx-player-dm-btn-send,
+.bpx-player-dm-management,
+.bpx-player-dm-function,
+.bpx-player-dm-load-status,
+.bpx-player-video-inputbar,
+.bpx-player-video-inputbar-wrap,
+#danmukuBox,
+.danmaku-wrap,
+.danmaku-box,
+.bpx-docker-minor,
+.bpx-player-auxiliary,
+.bpx-player-collapse,
+.bpx-player-collapse .bui-collapse-header,
+.bpx-player-collapse .bui-collapse-body,
+.bpx-docker-minor > .bpx-player-viewpoint,
+.bpx-docker-minor > .bpx-player-viewpoint .bpx-player-viewpoint-body,
+.bpx-player-viewpoint,
+.bpx-player-viewpoint-body,
+/* 新版分P / 合集 UI */
+.video-pod,
+.video-pod__header,
+.video-pod__body,
+.video-pod__list,
+.video-pod__item,
+.video-pod .single-p,
+.video-pod .multi-p,
+.video-pod .page-list,
+.video-pod .simple-base-item,
+/* 播放器骨架屏（加载占位） */
+#bilibili-player-placeholder,
+#bilibili-player-placeholder-top,
+#bilibili-player-placeholder-bottom,
+#bilibili-player-placeholder-bottom-left,
+#bilibili-player-placeholder-bottom-right {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ── 清掉播放器容器的圆角投影 ── */
+#playerWrap,
+#bilibili-player,
+.bpx-docker-major,
+.bpx-player-container,
+.bpx-player-video-area {
+  box-shadow: none !important;
+}
+
+/* ── 弹幕列表按钮 / 推荐展开收起 / 视频标签：连边框一起去掉 ── */
+.bpx-player-dm-btn-footer,
+.bpx-player-dm-btn-history,
+.recommend-list-v1 .rec-footer,
+.video-tag-container .tag-link,
+.video-tag-container .show-more-btn {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+/* ── 顶栏搜索框 ── */
+#nav-searchform .nav-search-content,
+#nav-searchform .nav-search-input,
+#nav-searchform .nav-search-btn {
+  background: transparent !important;
+}
+
+/* ── 弹出面板：半透明 + 毛玻璃（原来是 rgba(20,20,20,.9) 的近实心黑） ── */
+.bpx-player-ctrl-eplist-menu-wrap,
+.bpx-player-ctrl-eplist-menu,
+.bpx-player-dm-setting-box,
+.bpx-player-dm-setting-box .bui-panel,
+.bpx-player-dm-setting-left-block-add,
+.bpx-player-dm-setting-left-block-sync,
+.bpx-player-dm-setting-left-dmDensity {
+  background: rgba(10, 10, 12, 0.18) !important;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+`;
 
   function ensureBiliSurfacesTransparent() {
     if (!IS_BILIBILI) return;
