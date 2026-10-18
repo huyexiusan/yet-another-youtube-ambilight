@@ -1,7 +1,7 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.12
+// @version      1.3.13
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -393,27 +393,18 @@ void main() {
   }
 
   /**
-   * B 站右侧推荐栏（.right-container 等）的背景是透明的，
-   * 铺满页面的光晕会从下面透上来把封面染糊。
-   * 这里只给它们加一层「与页面背景同色」的不透明底色，
-   * 相当于让推荐栏真的盖在光晕上面。只改 background，不碰节点结构。
+   * B 站右侧栏的「外层透明、内层实色」是页面自己的结构：
+   *   .right-container       → rgba(0,0,0,0)  外层透明
+   *   .right-container-inner → rgb(9,9,11)    内层实底 ← 真正盖住光晕的是它
+   * 所以这里什么都不做，让原生背景生效即可。
+   * （早期版本曾给外层强行刷背景色，反而把内层实底搅乱，导致推荐栏被染色。）
    */
   function ensureSidebarOpaque() {
     if (!IS_BILIBILI) return;
-    const pageBg = (() => {
-      try {
-        const c = getComputedStyle(document.body).backgroundColor;
-        if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c;
-      } catch (e) { /* ignore */ }
-      return '#ffffff';
-    })();
-    ['.right-container', '.right-container-inner', '.rcmd-tab',
-     '.recommend-list-v1', '.rec-list'].forEach((sel) => {
-      document.querySelectorAll(sel).forEach((el) => {
-        if (el.dataset.ambiOpaque === '1') return;
-        el.dataset.ambiOpaque = '1';
-        el.style.background = pageBg;
-      });
+    // 只清掉历史上被我们改过的内联背景，恢复页面原生表现
+    document.querySelectorAll('[data-ambiOpaque="1"]').forEach((el) => {
+      el.style.background = '';
+      delete el.dataset.ambiOpaque;
     });
   }
 
@@ -659,8 +650,9 @@ void main() {
       dctx.filter = 'none';
       dctx.globalCompositeOperation = 'source-over';
 
-      // B 站：光晕照常铺满整页，不再做任何裁剪。
-      // 右侧推荐栏由 attach() 里加的「不透明背景」盖住光晕（见 ensureSidebarOpaque）。
+      // B 站：光晕照常铺满整页，不做任何裁剪。
+      // 页面内容之所以能盖住它，靠的是「body isolation + #app 透明 + 负 z-index」这套层叠，
+      // 以及页面自身容器（如 .right-container-inner）的实色背景。
     }
   }
 
