@@ -1,7 +1,7 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.13
+// @version      1.3.14
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -408,6 +408,58 @@ void main() {
     });
   }
 
+  /**
+   * B 站播放器周边的实心面板（视频下方发送区、右侧弹幕列表、视频选集等）
+   * 会挡住背后的光晕。参考 tosya301 的 page.css，把这些面板的底色清掉，
+   * 让光晕能像氛围光一样透出来。
+   * 纯 CSS 注入：只改 background / box-shadow，不碰 DOM 结构，不影响 Vue。
+   */
+  const BILI_SURFACE_CSS = [
+    '.bpx-player-sending-area',
+    '.bpx-player-sending-bar',
+    '.bpx-player-sending-bar-left',
+    '.bpx-player-sending-bar-right',
+    '.bpx-player-video-info',
+    '.bpx-player-dm-root',
+    '.bpx-player-dm-input',
+    '.bpx-player-dm-switch',
+    '.bpx-player-dm-setting',
+    '.bpx-player-dm-wrap',
+    '.bpx-player-dm-wrap-child',
+    '.bpx-player-dm-btn-send',
+    '.bpx-player-dm-btn-footer',
+    '.bpx-player-dm-btn-history',
+    '.bpx-player-dm-management',
+    '.bpx-player-dm-function',
+    '.bpx-player-dm-load-status',
+    '.bpx-player-video-inputbar',
+    '.bpx-player-video-inputbar-wrap',
+    '.bpx-player-sending-area::before',
+    '.bpx-player-sending-area::after',
+    '#danmukuBox',
+    '.danmaku-wrap',
+    '.danmaku-box',
+    '.bpx-docker-minor',
+    '.bpx-player-auxiliary',
+    '.bpx-player-collapse',
+    '.bpx-player-collapse .bui-collapse-header',
+    '.bpx-player-collapse .bui-collapse-body',
+    '.bpx-player-viewpoint',
+    '.bpx-player-viewpoint-body',
+    '.bpx-player-video-area',
+    '.bpx-player-video-perch',
+    '.bpx-player-video-wrap',
+  ].join(',\n') + ' {\n  background: transparent !important;\n  box-shadow: none !important;\n}\n';
+
+  function ensureBiliSurfacesTransparent() {
+    if (!IS_BILIBILI) return;
+    if (document.getElementById('ambi-mirror-bili-css')) return;
+    const st = document.createElement('style');
+    st.id = 'ambi-mirror-bili-css';
+    st.textContent = BILI_SURFACE_CSS;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
   function makeCanvas(host) {
     const c = document.createElement('canvas');
     c.id = 'ambi-mirror-canvas';
@@ -747,6 +799,7 @@ void main() {
         app.style.background = 'transparent';
       }
       ensureSidebarOpaque();
+      ensureBiliSurfacesTransparent();
     }
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
