@@ -1,7 +1,7 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.17
+// @version      1.3.18
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -460,7 +460,15 @@ void main() {
     // 视频选集菜单原来是 rgba(20,20,20,.9) 的近实心黑，改成半透明 + 毛玻璃，
     // 光晕能透上来，文字靠一层轻模糊保持可读。
     '.bpx-player-ctrl-eplist-menu-wrap,\n' +
-    '.bpx-player-ctrl-eplist-menu {\n' +
+    '.bpx-player-ctrl-eplist-menu,\n' +
+    // 弹幕设置面板同样是 rgba(20,20,20,.9) 的近实心黑。
+    // 注意：只改「面板容器」，下面的 bui-progress-* / bui-switch-* / bui-radio-* /
+    // bui-button-* 都是控件本身，改透明会让进度条和按钮消失，所以一律不动。
+    '.bpx-player-dm-setting-box,\n' +
+    '.bpx-player-dm-setting-box .bui-panel,\n' +
+    '.bpx-player-dm-setting-left-block-add,\n' +
+    '.bpx-player-dm-setting-left-block-sync,\n' +
+    '.bpx-player-dm-setting-left-dmDensity {\n' +
     '  background: rgba(10, 10, 12, 0.18) !important;\n' +
     '  -webkit-backdrop-filter: blur(16px);\n' +
     '  backdrop-filter: blur(16px);\n' +
