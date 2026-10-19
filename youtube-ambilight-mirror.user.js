@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         YouTube 氛围灯 · 径向反查版［实验版］
-// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.35-dev
+// @name         视频氛围灯 · 径向反查版
+// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
+// @version      1.5.0
 // @description  给网页视频加一圈从画面中心向外扩散的氛围光晕，颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili（含播放器透明化、圆角、边框渐隐）。
 // @author       huyexiusan
 // @match        *://*/*
@@ -41,14 +41,14 @@
   /* =========================================================================
    * 0. 基础工具
    * ========================================================================= */
-  const BOOT_FLAG = '__ambiMirrorBootedDev__';
+  const BOOT_FLAG = '__ambiMirrorBooted__';
   if (window[BOOT_FLAG]) return;
   window[BOOT_FLAG] = true;
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.35-dev';
-  const LS_KEY = 'ambi_mirror_settings_v1_dev';
+  const SCRIPT_VERSION = '1.5.0';
+  const LS_KEY = 'ambi_mirror_settings_v1';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
 
@@ -710,16 +710,16 @@ bili-comment-pictures-upload {
 
   function ensureBiliSurfacesTransparent() {
     if (!IS_BILIBILI) return;
-    if (document.getElementById('ambi-mirror-bili-css-dev')) return;
+    if (document.getElementById('ambi-mirror-bili-css')) return;
     const st = document.createElement('style');
-    st.id = 'ambi-mirror-bili-css-dev';
+    st.id = 'ambi-mirror-bili-css';
     st.textContent = BILI_SURFACE_CSS;
     (document.head || document.documentElement).appendChild(st);
   }
 
   function makeCanvas(host) {
     const c = document.createElement('canvas');
-    c.id = 'ambi-mirror-canvas-dev';
+    c.id = 'ambi-mirror-canvas';
     c.setAttribute('aria-hidden', 'true');
     Object.assign(c.style, {
       position: 'fixed',
@@ -1082,7 +1082,7 @@ bili-comment-pictures-upload {
     // 收掉旧版本残留在 DOM 里的辅助画布（1.4.24 / 1.4.26 删掉的那两层）。
     // state 里已经没有它们的引用，只能按 id 找 —— 不清理的话，升级脚本之后
     // 旧画布会一直挂在页面上，看起来就像「改了没生效」。
-    ['ambi-mirror-edge-dev', 'ambi-mirror-backdrop-dev'].forEach((id) => {
+    ['ambi-mirror-edge', 'ambi-mirror-backdrop'].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.remove();
     });
@@ -1630,7 +1630,7 @@ bili-comment-pictures-upload {
     saveSettings,
     // 排查那圈「框」用的：把三张画布各自的实际状态打出来
     layers() {
-      return ['ambi-mirror-canvas-dev', 'ambi-mirror-backdrop-dev', 'ambi-mirror-edge-dev']
+      return ['ambi-mirror-canvas', 'ambi-mirror-backdrop', 'ambi-mirror-edge']
         .map((id) => {
           const el = document.getElementById(id);
           if (!el) return id + ' 不存在';
