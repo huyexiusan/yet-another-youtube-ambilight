@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.0-dev
+// @version      1.4.2-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -773,26 +773,6 @@ bili-comment-pictures-upload {
       dctx.drawImage(state.glCanvas, 0, 0, out.width, out.height);
       dctx.filter = 'none';
 
-      // —— 近处精细层（第一层「近锐远柔」）——
-      // 全局大模糊会把画面边界那一圈的颜色和周围平均掉，导致光晕与视频"两张皮"。
-      // 这里在画面周围再补一圈「小模糊」，让贴近视频的光晕保持真实颜色，
-      // 向外仍是大模糊的柔和过渡。环外侧的突变由 ring 宽度 + 大模糊本身掩盖。
-      if (blurPx > 3) {
-        const cx0 = rectMinX * out.width;
-        const cy0 = rectMinY * out.height;
-        const cw = rectSizeX * out.width;
-        const chh = rectSizeY * out.height;
-        const ring = Math.max(20, blurPx * 1.8);
-        dctx.save();
-        dctx.beginPath();
-        dctx.rect(cx0 - ring, cy0 - ring, cw + ring * 2, chh + ring * 2);
-        dctx.rect(cx0, cy0, cw, chh);          // 内框挖掉，只画环
-        dctx.clip('evenodd');
-        dctx.filter = 'blur(' + Math.max(1, blurPx * 0.22).toFixed(2) + 'px)';
-        dctx.drawImage(state.glCanvas, 0, 0, out.width, out.height);
-        dctx.filter = 'none';
-        dctx.restore();
-      }
 
       // 把画面区域挖掉，露出上面的 <video>；这样光晕只留在画面之外，边缘不会被压暗
       const px = rectMinX * out.width;
@@ -815,6 +795,73 @@ bili-comment-pictures-upload {
       // 页面内容之所以能盖住它，靠的是「body isolation + #app 透明 + 负 z-index」这套层叠，
       // 以及页面自身容器（如 .right-container-inner）的实色背景。
     }
+
+    // —— 边缘羽化层（仅 B 站）——
+    // 光晕在图层的下面，视频是硬边矩形，交界处永远"两张皮"。
+    // 这里在视频【上方】叠一圈窄环（只覆盖画面周围 ring px），内容是画面的模糊版本，
+    // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
+    if (IS_BILIBILI) drawEdgeFeather();
+  }
+
+  /** 边缘羽化环：视频上方的一圈窄环，把画面边缘化进光晕。 */
+  function drawEdgeFeather() {
+    const ec = state.edgeCanvas;
+    const ectx = state.edgeCtx;
+    const glc = state.glCanvas;
+    if (!ec || !ectx || !glc || !state.video) return;
+
+    const vr = state.video.getBoundingClientRect();
+    if (!vr.width || !vr.height) return;
+
+    const blurPx = settings.blur * (state.ch / 512) * 1.275;
+    const ring = Math.max(28, Math.min(72, blurPx * 1.6));   // 环宽，封顶 72px，别碰旁边的栏
+    const x = vr.left - ring;
+    const y = vr.top - ring;
+    const w = Math.ceil(vr.width + ring * 2);
+    const h = Math.ceil(vr.height + ring * 2);
+    if (w < 8 || h < 8) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const needW = Math.round(w * dpr);
+    const needH = Math.round(h * dpr);
+    if (ec.width !== needW || ec.height !== needH) { ec.width = needW; ec.height = needH; }
+    ec.style.display = 'block';
+    ec.style.left = x + 'px';
+    ec.style.top = y + 'px';
+    ec.style.width = w + 'px';
+    ec.style.height = h + 'px';
+    ec.style.zIndex = '15';   // 视频之上、顶栏(1002)与控制栏之下
+
+    // 从已渲染的光晕画布里，裁出画面周围这一块
+    const glW = glc.width;
+    const glH = glc.height;
+    const vw = Math.max(1, window.innerWidth);
+    const vh = Math.max(1, window.innerHeight);
+    const sx = (x / vw) * glW;
+    const sy = (y / vh) * glH;
+    const sw = (w / vw) * glW;
+    const sh = (h / vh) * glH;
+
+    ectx.setTransform(1, 0, 0, 1, 0, 0);
+    // 必须和大光晕用同样的模糊，否则环内外的过渡不连续，看起来像给视频套了个框
+    ectx.filter = blurPx > 0.5 ? 'blur(' + blurPx.toFixed(2) + 'px)' : 'none';
+    ectx.clearRect(0, 0, ec.width, ec.height);
+    ectx.drawImage(glc, sx, sy, sw, sh, 0, 0, ec.width, ec.height);
+    ectx.filter = 'none';
+
+    // 向内羽化地挖掉画面矩形 —— 与 YouTube 版完全相同的做法
+    const px = (ring / w) * ec.width;
+    const py = (ring / h) * ec.height;
+    const pw = (vr.width / w) * ec.width;
+    const ph = (vr.height / h) * ec.height;
+    const feather = Math.max(2, Math.min(blurPx * 0.45 * dpr, Math.min(pw, ph) * 0.08));
+    ectx.globalCompositeOperation = 'destination-out';
+    ectx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
+    ectx.fillStyle = '#000';
+    ectx.fillRect(px + feather * 0.5, py + feather * 0.5,
+                  Math.max(1, pw - feather), Math.max(1, ph - feather));
+    ectx.filter = 'none';
+    ectx.globalCompositeOperation = 'source-over';
   }
 
   function tick(ts) {
@@ -867,6 +914,7 @@ bili-comment-pictures-upload {
     }
     state.host = null;
     if (state.canvas) { state.canvas.remove(); state.canvas = null; }
+    if (state.edgeCanvas) { state.edgeCanvas.remove(); state.edgeCanvas = null; state.edgeCtx = null; }
     state.dctx = null;
     state.glCanvas = null;
     if (state.gl) { try { state.gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch (e) {} }
@@ -912,6 +960,17 @@ bili-comment-pictures-upload {
     }
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+    // 边缘羽化层（仅 B 站）：视频上方的一圈窄环，负责把画面边缘溶进光晕
+    if (IS_BILIBILI) {
+      state.edgeCanvas = document.createElement('canvas');
+      state.edgeCanvas.id = 'ambi-mirror-edge-dev';
+      state.edgeCanvas.setAttribute('aria-hidden', 'true');
+      state.edgeCanvas.style.cssText =
+        'position:fixed;left:0;top:0;margin:0;padding:0;border:0;pointer-events:none;display:none;';
+      (document.body || document.documentElement).appendChild(state.edgeCanvas);
+      state.edgeCtx = state.edgeCanvas.getContext('2d', { alpha: true, desynchronized: true });
+    }
 
     // WebGL 渲染到一张离屏画布，再由 2D 层用 ctx.filter='blur()' 做浏览器原生高斯模糊
     // （和原版一致：不在着色器里多 tap 采样，所以完全没有颗粒噪点）
