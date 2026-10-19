@@ -1,7 +1,7 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.12-dev
+// @version      1.4.13-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -75,13 +75,13 @@
     mode: 'sweep',    // sweep = 径向反查 1:1（默认）/ mirror = 镜像 / clamp = 边缘拉伸(原版)
     expand: 120,      // 光晕扩散范围（占视口短边百分比，120 = 铺满屏幕）
     blur: 32,         // 模糊强度 0..100
-    opacity: 92,      // 光晕不透明度 0..100
+    opacity: 100,     // 光晕不透明度 0..100
     lookback: 1.0,    // 镜像模式的折叠倍率
     fadeStart: 0.12,  // alpha 开始衰减的位置（0=边缘，1=最外）
     fadeCurve: 0.85,  // 衰减曲线
     brightness: 100,
-    contrast: 104,
-    saturation: 112,
+    contrast: 100,
+    saturation: 100,
     vibrance: 100,
     resolution: 60,   // 采样纹理分辨率（占原视频宽百分比）
     maxFps: 30,
