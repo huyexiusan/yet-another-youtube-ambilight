@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.20-dev
+// @version      1.4.21-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -1041,7 +1041,7 @@ bili-comment-pictures-upload {
     // 环内只做轻微模糊：颜色要尽量贴近视频边缘的真实像素。
     // 之前用和背景层相同的 45px 大模糊，环内就成了「模糊背景 + 清晰视频方块」的对比，
     // 视觉上就是「视频浮在光晕上面」；环外侧与背景层的接缝交给四边渐隐处理。
-    ectx.filter = blurPx > 0.5 ? 'blur(' + (blurPx * 0.18).toFixed(2) + 'px)' : 'none';
+    ectx.filter = blurPx > 0.5 ? 'blur(' + Math.max(2, blurPx * 0.45).toFixed(2) + 'px)' : 'none';
     ectx.clearRect(0, 0, ec.width, ec.height);
     ectx.drawImage(glc, sx, sy, sw, sh, 0, 0, ec.width, ec.height);
     ectx.filter = 'none';
@@ -1066,7 +1066,7 @@ bili-comment-pictures-upload {
 
     // 环的外边界做渐隐 —— 否则环内（这里画的）和环外（背景层画的）会在 ring 处
     // 留下一条硬分界线（两侧都写过同一个像素，模糊的边缘效应也不同）。
-    const fade = Math.max(8, Math.min(28, ringL * 0.45));
+    const fade = Math.max(12, Math.min(60, ringL * 0.7));
     ectx.globalCompositeOperation = 'destination-in';
     let fadeGrad;
 
