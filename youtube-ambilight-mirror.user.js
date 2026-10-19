@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
-// @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
-// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.24
+// @name         YouTube 氛围灯 · 径向反查版［实验版］
+// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
+// @version      1.4.0-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -40,11 +40,11 @@
   /* =========================================================================
    * 0. 基础工具
    * ========================================================================= */
-  const BOOT_FLAG = '__ambiMirrorBooted__';
+  const BOOT_FLAG = '__ambiMirrorBootedDev__';
   if (window[BOOT_FLAG]) return;
   window[BOOT_FLAG] = true;
 
-  const LS_KEY = 'ambi_mirror_settings_v1';
+  const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
 
@@ -540,16 +540,16 @@ bili-comment-pictures-upload {
 
   function ensureBiliSurfacesTransparent() {
     if (!IS_BILIBILI) return;
-    if (document.getElementById('ambi-mirror-bili-css')) return;
+    if (document.getElementById('ambi-mirror-bili-css-dev')) return;
     const st = document.createElement('style');
-    st.id = 'ambi-mirror-bili-css';
+    st.id = 'ambi-mirror-bili-css-dev';
     st.textContent = BILI_SURFACE_CSS;
     (document.head || document.documentElement).appendChild(st);
   }
 
   function makeCanvas(host) {
     const c = document.createElement('canvas');
-    c.id = 'ambi-mirror-canvas';
+    c.id = 'ambi-mirror-canvas-dev';
     c.setAttribute('aria-hidden', 'true');
     Object.assign(c.style, {
       position: 'fixed',
