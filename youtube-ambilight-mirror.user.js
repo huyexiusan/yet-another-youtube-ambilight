@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.17-dev
+// @version      1.4.18-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -812,8 +812,23 @@ bili-comment-pictures-upload {
       dctx.globalCompositeOperation = 'destination-out';
       dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
       dctx.fillStyle = '#000';
-      dctx.fillRect(px + feather * 0.5, py + feather * 0.5,
-                    Math.max(1, pw - feather), Math.max(1, ph - feather));
+      // 圆角挖洞：YouTube 播放器本身是圆角（12px），直角挖洞会把它四角也能挖掉，
+      // 露出下面的深色页面背景 —— 就是模糊调小/为 0 时看到的那几个黑角。
+      {
+        const rx0 = px + feather * 0.5;
+        const ry0 = py + feather * 0.5;
+        const rw = Math.max(1, pw - feather);
+        const rh = Math.max(1, ph - feather);
+        const dprYt = Math.min(2, window.devicePixelRatio || 1);
+        const rrYt = Math.max(0, Math.min(12 * dprYt, Math.min(rw, rh) / 2));
+        dctx.beginPath();
+        if (rrYt > 0.5 && typeof dctx.roundRect === 'function') {
+          dctx.roundRect(rx0, ry0, rw, rh, rrYt);
+        } else {
+          dctx.rect(rx0, ry0, rw, rh);
+        }
+        dctx.fill();
+      }
       dctx.filter = 'none';
       dctx.globalCompositeOperation = 'source-over';
 
