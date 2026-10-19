@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.24
+// @version      1.3.25
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -772,27 +772,6 @@ bili-comment-pictures-upload {
       dctx.clearRect(0, 0, out.width, out.height);
       dctx.drawImage(state.glCanvas, 0, 0, out.width, out.height);
       dctx.filter = 'none';
-
-      // —— 近处精细层（第一层「近锐远柔」）——
-      // 全局大模糊会把画面边界那一圈的颜色和周围平均掉，导致光晕与视频"两张皮"。
-      // 这里在画面周围再补一圈「小模糊」，让贴近视频的光晕保持真实颜色，
-      // 向外仍是大模糊的柔和过渡。环外侧的突变由 ring 宽度 + 大模糊本身掩盖。
-      if (blurPx > 3) {
-        const cx0 = rectMinX * out.width;
-        const cy0 = rectMinY * out.height;
-        const cw = rectSizeX * out.width;
-        const chh = rectSizeY * out.height;
-        const ring = Math.max(20, blurPx * 1.8);
-        dctx.save();
-        dctx.beginPath();
-        dctx.rect(cx0 - ring, cy0 - ring, cw + ring * 2, chh + ring * 2);
-        dctx.rect(cx0, cy0, cw, chh);          // 内框挖掉，只画环
-        dctx.clip('evenodd');
-        dctx.filter = 'blur(' + Math.max(1, blurPx * 0.22).toFixed(2) + 'px)';
-        dctx.drawImage(state.glCanvas, 0, 0, out.width, out.height);
-        dctx.filter = 'none';
-        dctx.restore();
-      }
 
       // 把画面区域挖掉，露出上面的 <video>；这样光晕只留在画面之外，边缘不会被压暗
       const px = rectMinX * out.width;
