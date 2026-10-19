@@ -1,7 +1,7 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.11-dev
+// @version      1.4.12-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -805,7 +805,7 @@ bili-comment-pictures-upload {
     // —— 边缘羽化层（仅 B 站）——
     // 光晕在图层的下面，视频是硬边矩形，交界处永远"两张皮"。
     // 这里在视频【上方】叠一圈窄环（只覆盖画面周围 ring px），内容是画面的模糊版本，
-    // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
+    // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
     if (IS_BILIBILI) drawEdgeFeather();
   }
 
@@ -905,9 +905,9 @@ bili-comment-pictures-upload {
     const ph = (vr.height / h) * ec.height;
     // 羽化不超过环宽的 85%，否则羽化带超出环会被裁掉，交界反而更硬
     const feather = Math.max(6, Math.min(blurPx * 1.5 * dpr, Math.min(ringL, ringR) * 0.9 * dpr, Math.min(pw, ph) * 0.2));
-    // 让光晕颜色再往画面内部「吃」进去一段：挖洞矩形整体向内缩，
-    // 视频边缘这一圈就完全由光晕色覆盖，颜色越过边界渗进画面里。
-    const inset = Math.max(0, Math.min(blurPx * 0.55 * dpr, Math.min(pw, ph) * 0.06));
+    // 挖洞内缩：模糊越大，露出的底色范围越大，所以内缩深度必须和 blurPx 严格成正比。
+    // （之前被 短边×0.06 ≈ 26px 卡住上限，实际只吃到 25px，看起来就是这么浅。）
+    const inset = Math.max(0, Math.min(blurPx * 1.15 * dpr, Math.min(pw, ph) * 0.16));
     ectx.globalCompositeOperation = 'destination-out';
     ectx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
     ectx.fillStyle = '#000';
