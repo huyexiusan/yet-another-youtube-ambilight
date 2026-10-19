@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.16-dev
+// @version      1.4.17-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -826,6 +826,7 @@ bili-comment-pictures-upload {
     // 光晕在图层的下面，视频是硬边矩形，交界处永远"两张皮"。
     // 这里在视频【上方】叠一圈窄环（只覆盖画面周围 ring px），内容是画面的模糊版本，
     // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
+    if (IS_BILIBILI) drawVideoBackdrop();
     if (IS_BILIBILI) drawEdgeFeather();
   }
 
@@ -864,6 +865,52 @@ bili-comment-pictures-upload {
       bctx.filter = 'none';
     } catch (e) {
       // 跨域视频读不到像素：这一层留空，光晕照常工作
+      bc.style.display = 'none';
+    }
+  }
+
+  /**
+   * 视频底：只覆盖「视频 + 一点」的一层模糊视频，垫在视频下面。
+   * 视频容器做圆角后，四个角会裁掉一小块，露出下层；如果下层是透明的，
+   * 就会透出 body 的深色 —— 就是那四个黑角。垫上这层之后露出的是视频自己的颜色。
+   * 尺寸和位置每帧跟随 video，滚动时不会脱节。
+   */
+  function drawVideoBackdrop() {
+    const bc = state.backdropCanvas;
+    const bctx = state.backdropCtx;
+    const v = state.video;
+    if (!bc || !bctx || !v) return;
+    if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) return;
+
+    const vr = v.getBoundingClientRect();
+    if (vr.width < 8 || vr.height < 8) return;
+
+    const pad = 40;
+    const w = Math.ceil(vr.width + pad * 2);
+    const h = Math.ceil(vr.height + pad * 2);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const needW = Math.round(w * dpr);
+    const needH = Math.round(h * dpr);
+    if (bc.width !== needW || bc.height !== needH) { bc.width = needW; bc.height = needH; }
+    bc.style.display = 'block';
+    bc.style.left = (vr.left - pad) + 'px';
+    bc.style.top = (vr.top - pad) + 'px';
+    bc.style.width = w + 'px';
+    bc.style.height = h + 'px';
+
+    const scale = Math.max(bc.width / v.videoWidth, bc.height / v.videoHeight);
+    const dw = v.videoWidth * scale;
+    const dh = v.videoHeight * scale;
+    const dx = (bc.width - dw) / 2;
+    const dy = (bc.height - dh) / 2;
+
+    try {
+      bctx.filter = 'blur(24px) saturate(1.1)';
+      bctx.fillStyle = '#000';
+      bctx.fillRect(0, 0, bc.width, bc.height);
+      bctx.drawImage(v, dx, dy, dw, dh);
+      bctx.filter = 'none';
+    } catch (e) {
       bc.style.display = 'none';
     }
   }
