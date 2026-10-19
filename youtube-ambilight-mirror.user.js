@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.25-dev
+// @version      1.4.26-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.25-dev';
+  const SCRIPT_VERSION = '1.4.26-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -872,44 +872,46 @@ bili-comment-pictures-upload {
       dctx.filter = 'none';
 
 
-      // 把画面区域挖掉，露出上面的 <video>；这样光晕只留在画面之外，边缘不会被压暗
-      const px = rectMinX * out.width;
-      const py = rectMinY * out.height;
-      const pw = rectSizeX * out.width;
-      const ph = rectSizeY * out.height;
-      // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
-      // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
-      // 溶解宽度 = 模糊半径，但最多吃掉画面短边的 12%，避免大模糊时画面被吞掉
-      const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
-      dctx.globalCompositeOperation = 'destination-out';
-      dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
-      dctx.fillStyle = '#000';
-      // 圆角挖洞：YouTube 播放器本身是圆角（12px），直角挖洞会把它四角也能挖掉，
-      // 露出下面的深色页面背景 —— 就是模糊调小/为 0 时看到的那几个黑角。
-      {
-        const rx0 = px + feather * 0.5;
-        const ry0 = py + feather * 0.5;
-        const rw = Math.max(1, pw - feather);
-        const rh = Math.max(1, ph - feather);
-        const dprYt = Math.min(2, window.devicePixelRatio || 1);
-        // 挖洞的圆角必须跟着「圆角」滑块走：YouTube 固定 12px，B 站用滑块换算值。
-        // 以前这里写死 12px，B 站调成直角时四角会残留一圈没被擦掉的光晕。
-        const radCss = IS_BILIBILI ? clamp(settings.radius, 0, 100) * 0.24 : 12;
-        const rrYt = Math.max(0, Math.min(radCss * dprYt, Math.min(rw, rh) / 2));
-        dctx.beginPath();
-        if (rrYt > 0.5 && typeof dctx.roundRect === 'function') {
-          dctx.roundRect(rx0, ry0, rw, rh, rrYt);
-        } else {
-          dctx.rect(rx0, ry0, rw, rh);
+      // —— 挖洞：只给 YouTube 用 ——
+      // YouTube 的光晕在视频【上方】，不挖洞光晕会盖住画面，必须挖。
+      // B 站的光晕在视频【下方】（z-index:-1），视频本来就把它盖住了，挖洞纯属多余。
+      // 而且挖洞的羽化模糊会把边界外侧的 alpha 从 1 啃到 0.9 左右，透出 body 底色 ——
+      // 视频外面那圈"阴影"就是这么来的。不挖洞之后：
+      //   ① 边界 alpha = 1，一点底色都不透
+      //   ② 视频圆角处露出的是「画面那个角本身」（着色器里画面矩形内直接贴图），
+      //      不是 body 的深色，所以圆角黑角也一并消失，不需要任何垫底图层。
+      if (!IS_BILIBILI) {
+        const px = rectMinX * out.width;
+        const py = rectMinY * out.height;
+        const pw = rectSizeX * out.width;
+        const ph = rectSizeY * out.height;
+        // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
+        // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
+        // 溶解宽度 = 模糊半径，但最多吃掉画面短边的 12%，避免大模糊时画面被吞掉
+        const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
+        dctx.globalCompositeOperation = 'destination-out';
+        dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
+        dctx.fillStyle = '#000';
+        // 圆角挖洞：YouTube 播放器本身是圆角（12px），直角挖洞会把四角也挖掉，
+        // 露出下面的深色页面背景 —— 就是模糊调小 / 为 0 时看到的那几个黑角。
+        {
+          const rx0 = px + feather * 0.5;
+          const ry0 = py + feather * 0.5;
+          const rw = Math.max(1, pw - feather);
+          const rh = Math.max(1, ph - feather);
+          const dprYt = Math.min(2, window.devicePixelRatio || 1);
+          const rrYt = Math.max(0, Math.min(12 * dprYt, Math.min(rw, rh) / 2));
+          dctx.beginPath();
+          if (rrYt > 0.5 && typeof dctx.roundRect === 'function') {
+            dctx.roundRect(rx0, ry0, rw, rh, rrYt);
+          } else {
+            dctx.rect(rx0, ry0, rw, rh);
+          }
+          dctx.fill();
         }
-        dctx.fill();
+        dctx.filter = 'none';
+        dctx.globalCompositeOperation = 'source-over';
       }
-      dctx.filter = 'none';
-      dctx.globalCompositeOperation = 'source-over';
-
-      // B 站：光晕照常铺满整页，不做任何裁剪。
-      // 页面内容之所以能盖住它，靠的是「body isolation + #app 透明 + 负 z-index」这套层叠，
-      // 以及页面自身容器（如 .right-container-inner）的实色背景。
     }
 
     // —— 边缘羽化层（仅 B 站）——
