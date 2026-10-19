@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.31-dev
+// @version      1.4.32-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.31-dev';
+  const SCRIPT_VERSION = '1.4.32-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -985,10 +985,11 @@ bili-comment-pictures-upload {
         const ph = rectSizeY * out.height;
         // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
         // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
-        // 「边缘渐隐」开关在这里的作用：羽化带宽 → 视频边界外侧那一圈光晕的
-        // alpha 过渡更缓（0.84 → 1 的斜坡变宽）→ 边缘看起来更软。
-        const featherMul = settings.edgeFade ? 1.7 : 1.0;
-        const featherCap = settings.edgeFade ? 0.16 : 0.12;
+        // 「边缘渐隐」开关在这里的作用：羽化带宽 → 视频边界内侧那一圈被光晕
+        // 覆盖的比例（16% → 84%）的斜坡变宽 → 画面到光晕的过渡更缓。
+        // 系数从 1.7 提到 2.8：1.7 时斜坡只有约 43px，肉眼看不出和 1.0 的差别。
+        const featherMul = settings.edgeFade ? 2.8 : 1.0;
+        const featherCap = settings.edgeFade ? 0.22 : 0.12;
         const feather = Math.max(1, Math.min(blurPx * featherMul, Math.min(pw, ph) * featherCap));
         dctx.globalCompositeOperation = 'destination-out';
         dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
