@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.33-dev
+// @version      1.4.34-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.33-dev';
+  const SCRIPT_VERSION = '1.4.34-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -95,8 +95,8 @@
     radius: 50,       // 圆角 0..100：0=直角(B站原生)，50=12px(YouTube)，100=24px
     // B 站：视频四边做 alpha 渐隐，让边缘溶进下面的光晕（等价 YouTube 的向内羽化）
     edgeFade: true,
-    // 渐隐宽度 = blurPx × 这个倍数。70 = 0.7×；改这里就是改默认手感。
-    edgeFadeScale: 70,
+    // 渐隐宽度 = blurPx × 这个倍数。30 = 0.3×；改这里就是改默认手感。
+    edgeFadeScale: 30,
     lang: 'zh',       // 面板语言：zh / en
   };
 
@@ -130,7 +130,7 @@
       maxFps: '帧率上限',
       dither: '抖动（去色带）',
       edgeFade: '边缘渐隐',
-      edgeFadeScale: '渐隐程度',
+      edgeFadeScale: '视频边框渐隐',
       statusBlocked: '该视频受跨域限制，无法读取画面'
     },
     en: {
@@ -159,7 +159,7 @@
       maxFps: 'Frame rate cap',
       dither: 'Dither',
       edgeFade: 'Edge fade',
-      edgeFadeScale: 'Fade amount',
+      edgeFadeScale: 'Video border fade',
       statusBlocked: 'Cross-origin video: frames cannot be read'
     }
   };
@@ -1494,7 +1494,7 @@ bili-comment-pictures-upload {
     { key: 'radius', label: '圆角（仅B站生效）', min: 0, max: 100, step: 1, unit: '', note: '0=直角(B站原生) / 50=12px(YouTube) / 100=24px(更圆)' },
     { key: 'expand', label: '扩散范围', min: 10, max: 300, step: 5, unit: '%' },
     { key: 'blur', label: '模糊', min: 0, max: 100, step: 1, unit: '' },
-    { key: 'edgeFadeScale', label: '渐隐程度', min: 0, max: 200, step: 5, unit: '%', biliOnly: true },
+    { key: 'edgeFadeScale', label: '视频边框渐隐', min: 0, max: 200, step: 5, unit: '%', biliOnly: true },
     { key: 'opacity', label: '不透明度', min: 0, max: 100, step: 1, unit: '%' },
     { key: 'lookback', label: '折叠倍率（镜像）', min: 0.2, max: 3, step: 0.05, unit: '×', note: '仅「镜像」模式生效' },
     // 渐变起点 / 渐变曲线不再暴露成滑块：这两个是纯审美参数，
