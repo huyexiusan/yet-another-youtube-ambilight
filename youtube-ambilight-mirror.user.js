@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.10-dev
+// @version      1.4.11-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -523,19 +523,6 @@ bili-comment-pictures-upload {
   z-index: 20;
 }
 
-/* ── 视频本身：轻微模糊 + 四边渐隐遮罩，弱化与光晕之间的分割线 ── */
-.bpx-player-video-area video {
-  filter: blur(1.2px) !important;
-  -webkit-mask-image:
-    linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%),
-    linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
-  -webkit-mask-composite: source-in;
-  mask-image:
-    linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%),
-    linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
-  mask-composite: intersect;
-}
-
 /* ── 顶栏搜索框 ── */
 #nav-searchform .nav-search-content,
 #nav-searchform .nav-search-input,
@@ -873,8 +860,8 @@ bili-comment-pictures-upload {
 
     const blurPx = settings.blur * (state.ch / 512) * 1.275;
     // 左侧/上下给足羽化空间；右侧必须收窄，否则会压到推荐栏（视频右边 892，推荐栏 922）
-    const ringL = Math.max(48, Math.min(160, blurPx * 3.5));
-    const ringR = Math.min(ringL, 100);   // 放宽：推荐栏 z-index 更高，会把它盖住
+    const ringL = Math.max(200, Math.min(400, blurPx * 9));
+    const ringR = ringL;   // 右侧会被推荐栏(z-index:20)盖住，不再限制
     const x = vr.left - ringL;
     const y = vr.top - ringL;
     const w = Math.ceil(vr.width + ringL + ringR);
