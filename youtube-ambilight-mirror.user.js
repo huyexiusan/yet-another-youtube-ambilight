@@ -1,7 +1,7 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.22-dev
+// @version      1.4.23-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -44,6 +44,9 @@
   if (window[BOOT_FLAG]) return;
   window[BOOT_FLAG] = true;
 
+  // 版本号：面板标题和 __ambiMirror.version 都会显示它。
+  // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
+  const SCRIPT_VERSION = '1.4.23-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -886,7 +889,10 @@ bili-comment-pictures-upload {
         const rw = Math.max(1, pw - feather);
         const rh = Math.max(1, ph - feather);
         const dprYt = Math.min(2, window.devicePixelRatio || 1);
-        const rrYt = Math.max(0, Math.min(12 * dprYt, Math.min(rw, rh) / 2));
+        // 挖洞的圆角必须跟着「圆角」滑块走：YouTube 固定 12px，B 站用滑块换算值。
+        // 以前这里写死 12px，B 站调成直角时四角会残留一圈没被擦掉的光晕。
+        const radCss = IS_BILIBILI ? clamp(settings.radius, 0, 100) * 0.24 : 12;
+        const rrYt = Math.max(0, Math.min(radCss * dprYt, Math.min(rw, rh) / 2));
         dctx.beginPath();
         if (rrYt > 0.5 && typeof dctx.roundRect === 'function') {
           dctx.roundRect(rx0, ry0, rw, rh, rrYt);
@@ -907,7 +913,9 @@ bili-comment-pictures-upload {
     // 光晕在图层的下面，视频是硬边矩形，交界处永远"两张皮"。
     // 这里在视频【上方】叠一圈窄环（只覆盖画面周围 ring px），内容是画面的模糊版本，
     // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
-    if (IS_BILIBILI) drawVideoBackdrop();
+    // 视频底只在播放器有圆角时才需要 —— 它唯一的用途是填平圆角裁掉的那四个角。
+    // 直角播放器根本不需要它，白白在视频外围铺一圈 pad 宽的图层。
+    if (IS_BILIBILI && settings.radius > 0) drawVideoBackdrop();
     // 边缘羽化环已停用：模糊调高时它会露出一圈明显的光边
   }
 
@@ -966,7 +974,9 @@ bili-comment-pictures-upload {
     const vr = v.getBoundingClientRect();
     if (vr.width < 8 || vr.height < 8) return;
 
-    const pad = 40;
+    // 内边距只需要盖住圆角裁掉的那几个角。以前固定 40px，多出来的部分在
+    // 视频四周形成一块边界整齐的矩形 —— 也就是肉眼能看见的那圈「框」。
+    const pad = Math.max(8, Math.round(clamp(settings.radius, 0, 100) * 0.24) + 4);
     const w = Math.ceil(vr.width + pad * 2);
     const h = Math.ceil(vr.height + pad * 2);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -1210,16 +1220,10 @@ bili-comment-pictures-upload {
       state.backdropCtx = state.backdropCanvas.getContext('2d', { alpha: false, desynchronized: true });
     }
 
-    // 边缘羽化层（仅 B 站）：视频上方的一圈窄环，负责把画面边缘溶进光晕
-    if (IS_BILIBILI) {
-      state.edgeCanvas = document.createElement('canvas');
-      state.edgeCanvas.id = 'ambi-mirror-edge-dev';
-      state.edgeCanvas.setAttribute('aria-hidden', 'true');
-      state.edgeCanvas.style.cssText =
-        'position:fixed;left:0;top:0;margin:0;padding:0;border:0;pointer-events:none;display:none;';
-      (document.body || document.documentElement).appendChild(state.edgeCanvas);
-      state.edgeCtx = state.edgeCanvas.getContext('2d', { alpha: true, desynchronized: true });
-    }
+    // 边缘羽化层：已停用，画布也不再创建。
+    // drawEdgeFeather() 用的矩形画布本身就是一圈看得见的「框」，只停用绘制
+    // 却留着空画布会让人分不清到底哪层在出问题，所以连元素一起去掉。
+    // （deinit() 里对 edgeCanvas 的清理保留，用来收掉旧版本残留的元素。）
 
     // WebGL 渲染到一张离屏画布，再由 2D 层用 ctx.filter='blur()' 做浏览器原生高斯模糊
     // （和原版一致：不在着色器里多 tap 采样，所以完全没有颗粒噪点）
@@ -1423,7 +1427,7 @@ bili-comment-pictures-upload {
     panel.className = 'panel';
 
     const title = document.createElement('h3');
-    title.textContent = t('title');
+    title.textContent = t('title') + ' · v' + SCRIPT_VERSION;
     panel.appendChild(title);
 
     // 语言切换
@@ -1680,5 +1684,25 @@ bili-comment-pictures-upload {
   }
 
   // 方便在控制台里调试
-  window.__ambiMirror = { state, settings, bootstrap, attach, deinit, saveSettings };
+  window.__ambiMirror = {
+    version: SCRIPT_VERSION,
+    state,
+    settings,
+    bootstrap,
+    attach,
+    deinit,
+    saveSettings,
+    // 排查那圈「框」用的：把三张画布各自的实际状态打出来
+    layers() {
+      return ['ambi-mirror-canvas-dev', 'ambi-mirror-backdrop-dev', 'ambi-mirror-edge-dev']
+        .map((id) => {
+          const el = document.getElementById(id);
+          if (!el) return id + ' 不存在';
+          const s = getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          return id + ' display=' + s.display + ' z=' + s.zIndex +
+            ' rect=' + [r.left, r.top, r.width, r.height].map((n) => Math.round(n)).join(',');
+        });
+    },
+  };
 })();
