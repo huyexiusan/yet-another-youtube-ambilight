@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.3-dev
+// @version      1.4.4-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -815,8 +815,8 @@ bili-comment-pictures-upload {
 
     const blurPx = settings.blur * (state.ch / 512) * 1.275;
     // 左侧/上下给足羽化空间；右侧必须收窄，否则会压到推荐栏（视频右边 892，推荐栏 922）
-    const ringL = Math.max(28, Math.min(72, blurPx * 1.6));
-    const ringR = Math.min(ringL, 24);
+    const ringL = Math.max(32, Math.min(88, blurPx * 2.2));
+    const ringR = Math.min(ringL, 28);
     const x = vr.left - ringL;
     const y = vr.top - ringL;
     const w = Math.ceil(vr.width + ringL + ringR);
@@ -856,7 +856,8 @@ bili-comment-pictures-upload {
     const py = (ringL / h) * ec.height;
     const pw = (vr.width / w) * ec.width;
     const ph = (vr.height / h) * ec.height;
-    const feather = Math.max(2, Math.min(blurPx * 0.45 * dpr, Math.min(pw, ph) * 0.08));
+    // 羽化不超过环宽的 85%，否则羽化带超出环会被裁掉，交界反而更硬
+    const feather = Math.max(3, Math.min(blurPx * 0.85 * dpr, Math.min(ringL, ringR) * 0.85 * dpr, Math.min(pw, ph) * 0.12));
     ectx.globalCompositeOperation = 'destination-out';
     ectx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
     ectx.fillStyle = '#000';
