@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.30-dev
+// @version      1.4.31-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.30-dev';
+  const SCRIPT_VERSION = '1.4.31-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -618,21 +618,67 @@ bili-comment-pictures-upload {
    这边是让视频边缘自己变透明，方向相反、结果相同。
    两个方向的线性渐变取交集：四边渐隐、中间保持完全不透明。
    宽度由 --ambi-edge-fade 控制，JS 按模糊强度写入（模糊越大越宽）。 */
-/* 开关：只有 html 上带 data-ambi-edgefade="1" 时才生效（面板里的「边缘渐隐」）。 */
+/* 开关：只有 html 上带 data-ambi-edgefade="1" 时才生效（面板里的「边缘渐隐」）。
+   色标位置全部按 --ambi-edge-fade 换算，只有四边那一条渐隐，中间必须完全不透明。
+   alpha 走缓动而不是直线：直线渐变在中段掉得太快，视觉上仍然是一条明显的边。 */
 :root[data-ambi-edgefade="1"] .bpx-player-video-area video,
 :root[data-ambi-edgefade="1"] .bpx-player-video-wrap video {
   -webkit-mask-image:
-    linear-gradient(to bottom, transparent 0, #000 var(--ambi-edge-fade, 12px),
-                    #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%),
-    linear-gradient(to right, transparent 0, #000 var(--ambi-edge-fade, 12px),
-                    #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%);
+    linear-gradient(to bottom,
+      transparent 0,
+      rgba(0,0,0,.06) calc(var(--ambi-edge-fade, 12px) * .16),
+      rgba(0,0,0,.24) calc(var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.56) calc(var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.84) calc(var(--ambi-edge-fade, 12px) * .74),
+      #000 var(--ambi-edge-fade, 12px),
+      #000 calc(100% - var(--ambi-edge-fade, 12px)),
+      rgba(0,0,0,.84) calc(100% - var(--ambi-edge-fade, 12px) * .74),
+      rgba(0,0,0,.56) calc(100% - var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.24) calc(100% - var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.06) calc(100% - var(--ambi-edge-fade, 12px) * .16),
+      transparent 100%),
+    linear-gradient(to right,
+      transparent 0,
+      rgba(0,0,0,.06) calc(var(--ambi-edge-fade, 12px) * .16),
+      rgba(0,0,0,.24) calc(var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.56) calc(var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.84) calc(var(--ambi-edge-fade, 12px) * .74),
+      #000 var(--ambi-edge-fade, 12px),
+      #000 calc(100% - var(--ambi-edge-fade, 12px)),
+      rgba(0,0,0,.84) calc(100% - var(--ambi-edge-fade, 12px) * .74),
+      rgba(0,0,0,.56) calc(100% - var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.24) calc(100% - var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.06) calc(100% - var(--ambi-edge-fade, 12px) * .16),
+      transparent 100%);
   -webkit-mask-composite: source-in;
   -webkit-mask-size: 100% 100%;
   mask-image:
-    linear-gradient(to bottom, transparent 0, #000 var(--ambi-edge-fade, 12px),
-                    #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%),
-    linear-gradient(to right, transparent 0, #000 var(--ambi-edge-fade, 12px),
-                    #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%);
+    linear-gradient(to bottom,
+      transparent 0,
+      rgba(0,0,0,.06) calc(var(--ambi-edge-fade, 12px) * .16),
+      rgba(0,0,0,.24) calc(var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.56) calc(var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.84) calc(var(--ambi-edge-fade, 12px) * .74),
+      #000 var(--ambi-edge-fade, 12px),
+      #000 calc(100% - var(--ambi-edge-fade, 12px)),
+      rgba(0,0,0,.84) calc(100% - var(--ambi-edge-fade, 12px) * .74),
+      rgba(0,0,0,.56) calc(100% - var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.24) calc(100% - var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.06) calc(100% - var(--ambi-edge-fade, 12px) * .16),
+      transparent 100%),
+    linear-gradient(to right,
+      transparent 0,
+      rgba(0,0,0,.06) calc(var(--ambi-edge-fade, 12px) * .16),
+      rgba(0,0,0,.24) calc(var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.56) calc(var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.84) calc(var(--ambi-edge-fade, 12px) * .74),
+      #000 var(--ambi-edge-fade, 12px),
+      #000 calc(100% - var(--ambi-edge-fade, 12px)),
+      rgba(0,0,0,.84) calc(100% - var(--ambi-edge-fade, 12px) * .74),
+      rgba(0,0,0,.56) calc(100% - var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.24) calc(100% - var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.06) calc(100% - var(--ambi-edge-fade, 12px) * .16),
+      transparent 100%);
   mask-composite: intersect;
   mask-size: 100% 100%;
 }
@@ -909,7 +955,10 @@ bili-comment-pictures-upload {
       // 视频边缘渐隐的宽度跟着模糊走：模糊越大，边缘越宽地溶进光晕。
       // 只在值变化时写 CSS 变量，避免每帧触发样式重算。
       if (IS_BILIBILI) {
-        const fadeCss = Math.round(clamp(blurPx * 0.5, 10, 48));
+        // 交界线不是 alpha 断开造成的，而是「清晰视频 ↔ 大模糊光晕」的质地落差。
+        // 渐隐带太窄只是在那条线旁边加了一小截半透明，治不了落差 —— 带宽必须够大，
+        // 让清晰度从画面中心到光晕有一个足够长的坡。取 1.2×blurPx（1080p 下约 52px）。
+        const fadeCss = Math.round(clamp(blurPx * 1.2, 12, 80));
         if (state.lastEdgeFadePx !== fadeCss) {
           state.lastEdgeFadePx = fadeCss;
           document.documentElement.style.setProperty('--ambi-edge-fade', fadeCss + 'px');
