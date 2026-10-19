@@ -1,4 +1,4 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
 // @version      1.4.8-dev
@@ -906,11 +906,14 @@ bili-comment-pictures-upload {
     const ph = (vr.height / h) * ec.height;
     // 羽化不超过环宽的 85%，否则羽化带超出环会被裁掉，交界反而更硬
     const feather = Math.max(6, Math.min(blurPx * 1.5 * dpr, Math.min(ringL, ringR) * 0.9 * dpr, Math.min(pw, ph) * 0.2));
+    // 让光晕颜色再往画面内部「吃」进去一段：挖洞矩形整体向内缩，
+    // 视频边缘这一圈就完全由光晕色覆盖，颜色越过边界渗进画面里。
+    const inset = Math.max(0, Math.min(blurPx * 0.55 * dpr, Math.min(pw, ph) * 0.06));
     ectx.globalCompositeOperation = 'destination-out';
     ectx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
     ectx.fillStyle = '#000';
-    ectx.fillRect(px + feather * 0.5, py + feather * 0.5,
-                  Math.max(1, pw - feather), Math.max(1, ph - feather));
+    ectx.fillRect(px + inset + feather * 0.5, py + inset + feather * 0.5,
+                  Math.max(1, pw - inset * 2 - feather), Math.max(1, ph - inset * 2 - feather));
     ectx.filter = 'none';
     ectx.globalCompositeOperation = 'source-over';
 
