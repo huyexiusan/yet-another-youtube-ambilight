@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.32-dev
+// @version      1.4.33-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.32-dev';
+  const SCRIPT_VERSION = '1.4.33-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -95,6 +95,8 @@
     radius: 50,       // 圆角 0..100：0=直角(B站原生)，50=12px(YouTube)，100=24px
     // B 站：视频四边做 alpha 渐隐，让边缘溶进下面的光晕（等价 YouTube 的向内羽化）
     edgeFade: true,
+    // 渐隐宽度 = blurPx × 这个倍数。70 = 0.7×；改这里就是改默认手感。
+    edgeFadeScale: 70,
     lang: 'zh',       // 面板语言：zh / en
   };
 
@@ -128,6 +130,7 @@
       maxFps: '帧率上限',
       dither: '抖动（去色带）',
       edgeFade: '边缘渐隐',
+      edgeFadeScale: '渐隐程度',
       statusBlocked: '该视频受跨域限制，无法读取画面'
     },
     en: {
@@ -156,6 +159,7 @@
       maxFps: 'Frame rate cap',
       dither: 'Dither',
       edgeFade: 'Edge fade',
+      edgeFadeScale: 'Fade amount',
       statusBlocked: 'Cross-origin video: frames cannot be read'
     }
   };
@@ -955,10 +959,10 @@ bili-comment-pictures-upload {
       // 视频边缘渐隐的宽度跟着模糊走：模糊越大，边缘越宽地溶进光晕。
       // 只在值变化时写 CSS 变量，避免每帧触发样式重算。
       if (IS_BILIBILI) {
-        // 交界线不是 alpha 断开造成的，而是「清晰视频 ↔ 大模糊光晕」的质地落差。
-        // 渐隐带太窄只是在那条线旁边加了一小截半透明，治不了落差 —— 带宽必须够大，
-        // 让清晰度从画面中心到光晕有一个足够长的坡。取 1.2×blurPx（1080p 下约 52px）。
-        const fadeCss = Math.round(clamp(blurPx * 1.2, 12, 80));
+        // 交界线不是 alpha 断开造成的，而是「清晰视频 ↔ 大模糊光晕」的质地落差，
+        // 带宽必须够大才摊得平。宽度 = blurPx × (渐隐程度/100)，面板可调。
+        const scale = clamp(settings.edgeFadeScale, 0, 200) / 100;
+        const fadeCss = Math.round(clamp(blurPx * scale, 0, 160));
         if (state.lastEdgeFadePx !== fadeCss) {
           state.lastEdgeFadePx = fadeCss;
           document.documentElement.style.setProperty('--ambi-edge-fade', fadeCss + 'px');
@@ -985,12 +989,8 @@ bili-comment-pictures-upload {
         const ph = rectSizeY * out.height;
         // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
         // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
-        // 「边缘渐隐」开关在这里的作用：羽化带宽 → 视频边界内侧那一圈被光晕
-        // 覆盖的比例（16% → 84%）的斜坡变宽 → 画面到光晕的过渡更缓。
-        // 系数从 1.7 提到 2.8：1.7 时斜坡只有约 43px，肉眼看不出和 1.0 的差别。
-        const featherMul = settings.edgeFade ? 2.8 : 1.0;
-        const featherCap = settings.edgeFade ? 0.22 : 0.12;
-        const feather = Math.max(1, Math.min(blurPx * featherMul, Math.min(pw, ph) * featherCap));
+        // 溶解宽度 = 模糊半径，但最多吃掉画面短边的 12%，避免大模糊时画面被吞掉
+        const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
         dctx.globalCompositeOperation = 'destination-out';
         dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
         dctx.fillStyle = '#000';
@@ -1494,6 +1494,7 @@ bili-comment-pictures-upload {
     { key: 'radius', label: '圆角（仅B站生效）', min: 0, max: 100, step: 1, unit: '', note: '0=直角(B站原生) / 50=12px(YouTube) / 100=24px(更圆)' },
     { key: 'expand', label: '扩散范围', min: 10, max: 300, step: 5, unit: '%' },
     { key: 'blur', label: '模糊', min: 0, max: 100, step: 1, unit: '' },
+    { key: 'edgeFadeScale', label: '渐隐程度', min: 0, max: 200, step: 5, unit: '%', biliOnly: true },
     { key: 'opacity', label: '不透明度', min: 0, max: 100, step: 1, unit: '%' },
     { key: 'lookback', label: '折叠倍率（镜像）', min: 0.2, max: 3, step: 0.05, unit: '×', note: '仅「镜像」模式生效' },
     // 渐变起点 / 渐变曲线不再暴露成滑块：这两个是纯审美参数，
@@ -1615,8 +1616,8 @@ bili-comment-pictures-upload {
     modeRow.appendChild(sel);
     panel.appendChild(modeRow);
 
-    // 边缘渐隐开关（两个平台都有，但实现不同）
-    {
+    // 边缘渐隐开关（仅 B 站；YouTube 的等效做法试过两版都看不出差别，已放弃）
+    if (IS_BILIBILI) {
       const efRow = document.createElement('div');
       efRow.className = 'row';
       const efLab = document.createElement('label');
@@ -1642,6 +1643,8 @@ bili-comment-pictures-upload {
 
     // 滑块
     for (const c of CONTROLS) {
+      // 仅 B 站生效的项（渐隐程度）在 YouTube 上不渲染
+      if (c.biliOnly && !IS_BILIBILI) continue;
       const row = document.createElement('div');
       row.className = 'row';
       const lab = document.createElement('label');
@@ -1650,6 +1653,7 @@ bili-comment-pictures-upload {
       val.className = 'val';
       const input = document.createElement('input');
       input.type = 'range';
+      input.dataset.key = c.key;   // 「恢复默认」按 key 对号，不再依赖索引顺序
       input.min = c.min;
       input.max = c.max;
       input.step = c.step;
@@ -1697,8 +1701,10 @@ bili-comment-pictures-upload {
     reset.addEventListener('click', () => {
       Object.assign(settings, DEFAULTS);
       saveSettings();
-      shadow.querySelectorAll('input[type=range]').forEach((el, i) => {
-        el.value = settings[CONTROLS[i].key];
+      // 滑块按 data-key 恢复，不能用 CONTROLS[i] —— 因为 biliOnly 的项
+      // 在 YouTube 上不渲染，两边索引对不上
+      shadow.querySelectorAll('input[type=range][data-key]').forEach((el) => {
+        el.value = settings[el.dataset.key];
         el.dispatchEvent(new Event('input'));
       });
       // 复选框也要跟着恢复，否则面板显示和实际设置对不上（启用 / 边缘渐隐）
