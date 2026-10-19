@@ -1,4 +1,4 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
 // @version      1.4.13-dev
@@ -92,6 +92,11 @@
   function loadSettings() {
     let raw = {};
     try { raw = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch (e) { raw = {}; }
+    // 迁移：这三个的旧默认值是 92 / 104 / 112，新默认值统一为 100。
+    // 仅当用户从未改动过（仍是旧默认值）时才重置，不会覆盖手调过的值。
+    if (raw && raw.opacity === 92 && raw.contrast === 104 && raw.saturation === 112) {
+      delete raw.opacity; delete raw.contrast; delete raw.saturation;
+    }
     const out = Object.assign({}, DEFAULTS, raw || {});
     for (const k of Object.keys(DEFAULTS)) {
       if (typeof DEFAULTS[k] === 'number') out[k] = num(out[k], DEFAULTS[k]);
