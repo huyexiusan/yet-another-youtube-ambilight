@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.18-dev
+// @version      1.4.20-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -87,7 +87,73 @@
     maxFps: 30,
     dither: 0,        // 抖动强度 0..100（默认关，避免颗粒感）
     radius: 50,       // 圆角 0..100：0=直角(B站原生)，50=12px(YouTube)，100=24px
+    lang: 'zh',       // 面板语言：zh / en
   };
+
+  /* =========================================================================
+   * 面板文案（中 / 英）
+   * ========================================================================= */
+  const I18N = {
+    zh: {
+      title: '氛围灯 · 径向反查',
+      lang: '语言',
+      enabled: '启用',
+      hint: '以画面中心为极点沿半径反查：光晕往外延展多少，就往画面里回查多少（1:1），贴着画面处取边界色。',
+      mode: '采样方式',
+      mode_sweep: '径向反查 1:1（默认）',
+      mode_mirror: '镜像折叠',
+      mode_clamp: '边缘拉伸（原版）',
+      radius: '圆角（仅B站生效）',
+      radiusNote: '0=直角(B站原生) / 50=12px(YouTube) / 100=24px(更圆)',
+      expand: '扩散范围',
+      blur: '模糊',
+      opacity: '不透明度',
+      lookback: '折叠倍率（镜像）',
+      lookbackNote: '仅「镜像」模式生效',
+      fadeStart: '渐变起点',
+      fadeCurve: '渐变曲线',
+      brightness: '亮度',
+      contrast: '对比度',
+      saturation: '饱和度',
+      vibrance: '色彩（自然饱和度）',
+      resolution: '采样分辨率',
+      maxFps: '帧率上限',
+      dither: '抖动（去色带）',
+      statusBlocked: '该视频受跨域限制，无法读取画面'
+    },
+    en: {
+      title: 'Ambient Light · Radial Sampling',
+      lang: 'Language',
+      enabled: 'Enabled',
+      hint: 'Polar sampling: the glow reaches outward by the same distance it looks back into the frame (1:1), so the halo keeps the colors of the real edge pixels.',
+      mode: 'Sampling mode',
+      mode_sweep: 'Radial 1:1 (default)',
+      mode_mirror: 'Mirror fold',
+      mode_clamp: 'Edge stretch (original)',
+      radius: 'Corner radius (Bilibili only)',
+      radiusNote: '0 = square (native) / 50 = 12px (YouTube) / 100 = 24px',
+      expand: 'Spread',
+      blur: 'Blur',
+      opacity: 'Opacity',
+      lookback: 'Fold ratio (mirror)',
+      lookbackNote: 'Only in Mirror mode',
+      fadeStart: 'Fade start',
+      fadeCurve: 'Fade curve',
+      brightness: 'Brightness',
+      contrast: 'Contrast',
+      saturation: 'Saturation',
+      vibrance: 'Vibrance',
+      resolution: 'Sampling resolution',
+      maxFps: 'Frame rate cap',
+      dither: 'Dither',
+      statusBlocked: 'Cross-origin video: frames cannot be read'
+    }
+  };
+
+  function t(key) {
+    const lang = settings && settings.lang === 'en' ? 'en' : 'zh';
+    return (I18N[lang] && I18N[lang][key]) || I18N.zh[key] || key;
+  }
 
   const settings = loadSettings();
   function loadSettings() {
@@ -1357,15 +1423,44 @@ bili-comment-pictures-upload {
     panel.className = 'panel';
 
     const title = document.createElement('h3');
-    title.textContent = '氛围灯 · 径向反查';
+    title.textContent = t('title');
     panel.appendChild(title);
+
+    // 语言切换
+    {
+      const langRow = document.createElement('div');
+      langRow.className = 'row';
+      const langLab = document.createElement('label');
+      langLab.textContent = t('lang');
+      const langSel = document.createElement('select');
+      langSel.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.08);color:#e6e6e8;' +
+        'border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:4px 6px;font-size:11.5px;outline:none;';
+      [['zh', '中文'], ['en', 'English']].forEach(([v, txt]) => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = txt;
+        if ((settings.lang || 'zh') === v) o.selected = true;
+        langSel.appendChild(o);
+      });
+      langSel.addEventListener('change', () => {
+        settings.lang = langSel.value;
+        saveSettings();
+        const old = document.getElementById('ambi-mirror-root');
+        if (old) old.remove();
+        shadowRoot = null;
+        createPanel();
+      });
+      langRow.appendChild(langLab);
+      langRow.appendChild(langSel);
+      panel.appendChild(langRow);
+    }
 
     // 总开关
     const swRow = document.createElement('div');
     swRow.className = 'row';
     // 注意：YouTube 开启了 Trusted Types，不能给 innerHTML 赋字符串，这里全部用 DOM API
     const swLabel = document.createElement('label');
-    swLabel.textContent = '启用';
+    swLabel.textContent = t('enabled');
     swLabel.style.cssText = 'font-weight:600;color:#e8e8ea';
     swRow.appendChild(swLabel);
     const sw = document.createElement('div');
@@ -1384,25 +1479,25 @@ bili-comment-pictures-upload {
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = '以画面中心为极点沿半径反查：光晕';
+    hint.textContent = t('hint');
     const hintStrong = document.createElement('b');
-    hintStrong.textContent = '往外延展多少，就往画面里回查多少（1:1）';
+    hintStrong.textContent = '';
     hint.appendChild(hintStrong);
-    hint.appendChild(document.createTextNode('，贴着画面处取边界色。'));
+    
     panel.appendChild(hint);
 
     // 采样方式
     const modeRow = document.createElement('div');
     modeRow.className = 'row';
     const modeLab = document.createElement('label');
-    modeLab.textContent = '采样方式';
+    modeLab.textContent = t('mode');
     const sel = document.createElement('select');
     sel.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.08);color:#e6e6e8;' +
       'border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:4px 6px;font-size:11.5px;outline:none;';
-    [['sweep', '径向反查 1:1（默认）'], ['mirror', '镜像折叠'], ['clamp', '边缘拉伸（原版）']].forEach(([v, txt]) => {
+    [['sweep', 'mode_sweep'], ['mirror', 'mode_mirror'], ['clamp', 'mode_clamp']].forEach(([v, txtKey]) => {
       const o = document.createElement('option');
       o.value = v;
-      o.textContent = txt;
+      o.textContent = t(txtKey);
       if (settings.mode === v) o.selected = true;
       sel.appendChild(o);
     });
@@ -1420,7 +1515,7 @@ bili-comment-pictures-upload {
       const row = document.createElement('div');
       row.className = 'row';
       const lab = document.createElement('label');
-      lab.textContent = c.label;
+      lab.textContent = t(c.key);
       const val = document.createElement('span');
       val.className = 'val';
       const input = document.createElement('input');
@@ -1455,11 +1550,11 @@ bili-comment-pictures-upload {
       row.appendChild(box);
       panel.appendChild(row);
 
-      if (c.note) {
+      if (c.noteKey || c.key === 'radius' || c.key === 'lookback') {
         const n = document.createElement('div');
         n.className = 'hint';
         n.style.margin = '-2px 0 6px';
-        n.textContent = c.note;
+        n.textContent = t(c.key + 'Note');
         panel.appendChild(n);
       }
     }
