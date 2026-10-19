@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.27-dev
+// @version      1.4.28-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.27-dev';
+  const SCRIPT_VERSION = '1.4.28-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -609,6 +609,29 @@ bili-comment-pictures-upload {
   overflow: hidden !important;
 }
 
+/* ── 视频边缘渐隐：四边做成半透明，露出下面光晕里的「模糊画面」 ──
+   等价于 YouTube 版的向内羽化 —— 那边是擦掉光晕上的画面边缘，
+   这边是让视频边缘自己变透明，方向相反、结果相同。
+   两个方向的线性渐变取交集：四边渐隐、中间保持完全不透明。
+   宽度由 --ambi-edge-fade 控制，JS 按模糊强度写入（模糊越大越宽）。 */
+.bpx-player-video-area video,
+.bpx-player-video-wrap video {
+  -webkit-mask-image:
+    linear-gradient(to bottom, transparent 0, #000 var(--ambi-edge-fade, 12px),
+                    #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%),
+    linear-gradient(to right, transparent 0, #000 var(--ambi-edge-fade, 12px),
+                    #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%);
+  -webkit-mask-composite: source-in;
+  -webkit-mask-size: 100% 100%;
+  mask-image:
+    linear-gradient(to bottom, transparent 0, #000 var(--ambi-edge-fade, 12px),
+                    #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%),
+    linear-gradient(to right, transparent 0, #000 var(--ambi-edge-fade, 12px),
+                    #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%);
+  mask-composite: intersect;
+  mask-size: 100% 100%;
+}
+
 /* ── 顶栏搜索框 ── */
 #nav-searchform .nav-search-content,
 #nav-searchform .nav-search-input,
@@ -866,6 +889,16 @@ bili-comment-pictures-upload {
     if (dctx && out) {
       // 原版公式：blurPx = blur2 * (height / 512) * 1.275
       const blurPx = settings.blur * (state.ch / 512) * 1.275;
+
+      // 视频边缘渐隐的宽度跟着模糊走：模糊越大，边缘越宽地溶进光晕。
+      // 只在值变化时写 CSS 变量，避免每帧触发样式重算。
+      if (IS_BILIBILI) {
+        const fadeCss = Math.round(clamp(blurPx * 0.5, 10, 48));
+        if (state.edgeFade !== fadeCss) {
+          state.edgeFade = fadeCss;
+          document.documentElement.style.setProperty('--ambi-edge-fade', fadeCss + 'px');
+        }
+      }
       dctx.filter = blurPx > 0.5 ? 'blur(' + blurPx.toFixed(2) + 'px)' : 'none';
       dctx.clearRect(0, 0, out.width, out.height);
       dctx.drawImage(state.glCanvas, 0, 0, out.width, out.height);
