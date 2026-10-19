@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.23-dev
+// @version      1.4.24-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.23-dev';
+  const SCRIPT_VERSION = '1.4.24-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -913,9 +913,11 @@ bili-comment-pictures-upload {
     // 光晕在图层的下面，视频是硬边矩形，交界处永远"两张皮"。
     // 这里在视频【上方】叠一圈窄环（只覆盖画面周围 ring px），内容是画面的模糊版本，
     // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
-    // 视频底只在播放器有圆角时才需要 —— 它唯一的用途是填平圆角裁掉的那四个角。
-    // 直角播放器根本不需要它，白白在视频外围铺一圈 pad 宽的图层。
-    if (IS_BILIBILI && settings.radius > 0) drawVideoBackdrop();
+    // 视频底已停用：用户要的是彻底不要这一层。
+    // 它的边界（视频 + pad）会形成一圈看得见的矩形框，pad 改小只是让框变小。
+    // 圆角黑角由「圆角挖洞」负责 —— 挖洞半径和容器的 border-radius 是同一套
+    // 换算，圆角处挖掉的范围正好等于视频被裁掉的范围，露出的是光晕而不是 body。
+    // if (IS_BILIBILI && settings.radius > 0) drawVideoBackdrop();
     // 边缘羽化环已停用：模糊调高时它会露出一圈明显的光边
   }
 
@@ -1206,19 +1208,9 @@ bili-comment-pictures-upload {
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
 
-    // 投影底（backdrop）：垫在光晕下面的一层「不透明的模糊视频」。
-    // 光晕是半透明的，直接铺在页面上会透出 body 背景 —— 暗色模式透出黑、亮色模式透出白，
-    // 视频周围就出现一圈随主题变化的"阴影"。垫上这层后透出的是视频自己的颜色。
-    {
-      state.backdropCanvas = document.createElement('canvas');
-      state.backdropCanvas.id = 'ambi-mirror-backdrop-dev';
-      state.backdropCanvas.setAttribute('aria-hidden', 'true');
-      state.backdropCanvas.style.cssText =
-        'position:fixed;left:0;top:0;margin:0;padding:0;border:0;pointer-events:none;display:none;' +
-        'z-index:' + (IS_BILIBILI ? '-2' : '2147481999') + ';';
-      (document.body || document.documentElement).appendChild(state.backdropCanvas);
-      state.backdropCtx = state.backdropCanvas.getContext('2d', { alpha: false, desynchronized: true });
-    }
+    // 投影底 / 视频底：已停用，画布也不再创建。
+    // 这层画布比视频大一圈，边界是硬矩形，会在视频外围留下一圈看得见的框。
+    // （deinit() 里对 backdropCanvas 的清理保留，用来收掉旧版本残留的元素。）
 
     // 边缘羽化层：已停用，画布也不再创建。
     // drawEdgeFeather() 用的矩形画布本身就是一圈看得见的「框」，只停用绘制
