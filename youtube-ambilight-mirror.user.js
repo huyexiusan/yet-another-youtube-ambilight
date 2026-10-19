@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.9-dev
+// @version      1.4.10-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -818,8 +818,7 @@ bili-comment-pictures-upload {
     // —— 边缘羽化层（仅 B 站）——
     // 光晕在图层的下面，视频是硬边矩形，交界处永远"两张皮"。
     // 这里在视频【上方】叠一圈窄环（只覆盖画面周围 ring px），内容是画面的模糊版本，
-    // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
-    drawBackdrop(settings.blur * (state.ch / 512) * 1.275);
+    // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
     if (IS_BILIBILI) drawEdgeFeather();
   }
 
