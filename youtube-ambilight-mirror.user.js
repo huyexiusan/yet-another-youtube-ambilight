@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.26-dev
+// @version      1.4.27-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.26-dev';
+  const SCRIPT_VERSION = '1.4.27-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -595,11 +595,11 @@ bili-comment-pictures-upload {
   box-shadow: none !important;
 }
 
-/* ── 让右侧推荐栏盖住边缘羽化层（z-index 15），这样环的右边界可以放宽 ── */
-.right-container {
-  position: relative;
-  z-index: 20;
-}
+/* ── 右侧推荐栏：这里曾经有一条 position:relative + z-index:20，
+       目的是让推荐栏盖住「边缘羽化层」(z-index 15，环宽 400px 会压到推荐栏)。
+       羽化层在 1.4.24 已删除，这条规则失去对象，只剩副作用：
+       它让 .right-container 自己形成层叠上下文，把 B 站的小窗压在了下面。
+       光晕现在在 z-index:-1，任何页面内容都天然盖在它上面，不需要这条。 ── */
 
 /* ── 播放器圆角（变量由面板滑块控制）── */
 .bpx-player-video-area,
