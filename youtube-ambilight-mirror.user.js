@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.24-dev
+// @version      1.4.25-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.24-dev';
+  const SCRIPT_VERSION = '1.4.25-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -80,8 +80,11 @@
     blur: 32,         // 模糊强度 0..100
     opacity: 100,     // 光晕不透明度 0..100
     lookback: 1.0,    // 镜像模式的折叠倍率
-    fadeStart: 0.12,  // alpha 开始衰减的位置（0=边缘，1=最外）
-    fadeCurve: 0.85,  // 衰减曲线
+    // 渐变起点 / 曲线：来自原版 spreadFadeStart(15) / spreadFadeCurve(35)，
+    // 换算成 fadeStart = spreadFadeStart/100、fadeCurve = 16/(curve*0.64)。
+    // 已不暴露成滑块，值固定。改这两个会影响光晕往外淡出的形状。
+    fadeStart: 0.12,
+    fadeCurve: 0.85,
     brightness: 100,
     contrast: 100,
     saturation: 100,
@@ -1388,8 +1391,8 @@ bili-comment-pictures-upload {
     { key: 'blur', label: '模糊', min: 0, max: 100, step: 1, unit: '' },
     { key: 'opacity', label: '不透明度', min: 0, max: 100, step: 1, unit: '%' },
     { key: 'lookback', label: '折叠倍率（镜像）', min: 0.2, max: 3, step: 0.05, unit: '×', note: '仅「镜像」模式生效' },
-    { key: 'fadeStart', label: '渐变起点', min: 0, max: 0.9, step: 0.01, unit: '' },
-    { key: 'fadeCurve', label: '渐变曲线', min: 0.2, max: 3, step: 0.05, unit: '' },
+    // 渐变起点 / 渐变曲线不再暴露成滑块：这两个是纯审美参数，
+    // 调了也看不出明显差别，值和原版换算是定死的（见 DEFAULTS）。
     { key: 'brightness', label: '亮度', min: 0, max: 200, step: 1, unit: '%' },
     { key: 'contrast', label: '对比度', min: 40, max: 200, step: 1, unit: '%' },
     { key: 'saturation', label: '饱和度', min: 0, max: 200, step: 1, unit: '%' },
