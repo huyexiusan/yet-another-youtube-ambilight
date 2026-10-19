@@ -1,8 +1,8 @@
-﻿// ==UserScript==
-// @name         YouTube 氛围灯 · 径向反查版 (Ambilight Mirror)
-// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.3.25
-// @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
+// ==UserScript==
+// @name         YouTube 氛围灯 · 径向反查版［实验版］
+// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
+// @version      1.4.35-dev
+// @description  给网页视频加一圈从画面中心向外扩散的氛围光晕，颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili（含播放器透明化、圆角、边框渐隐）。
 // @author       huyexiusan
 // @match        *://*/*
 // @run-at       document-idle
@@ -29,8 +29,9 @@
  *   另外：
  *     - 画布铺满整个视口，光晕能一路漫到屏幕边缘；
  *     - 透明度按到画面边界的欧氏距离归一化，四个角不会出现直角硬边；
- *     - 模糊不在着色器里做，而是把画面与光晕一起交给 2D canvas 的 ctx.filter='blur()'，
- *       再用「向内羽化」挖掉画面矩形，让视频边缘溶进光晕里；
+ *     - 模糊不在着色器里做，而是把画面与光晕一起交给 2D canvas 的 ctx.filter='blur()'；
+ *       YouTube 的光晕在视频上方，再用「向内羽化」挖掉画面矩形，让边缘溶进光晕；
+ *       B 站的光晕在视频下方，不挖洞 —— 视频边缘靠 CSS mask 四边渐隐溶进光晕；
  *     - 全程 highp、不用 mipmap，避免原版 mip 崩塌和 lowp 量化引起的色块与台阶。
  */
 
@@ -40,33 +41,18 @@
   /* =========================================================================
    * 0. 基础工具
    * ========================================================================= */
-  const BOOT_FLAG = '__ambiMirrorBooted__';
+  const BOOT_FLAG = '__ambiMirrorBootedDev__';
   if (window[BOOT_FLAG]) return;
   window[BOOT_FLAG] = true;
 
-  const LS_KEY = 'ambi_mirror_settings_v1';
+  // 版本号：面板标题和 __ambiMirror.version 都会显示它。
+  // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
+  const SCRIPT_VERSION = '1.4.35-dev';
+  const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
 
-  // 页面背景是不是深色（B 站暗夜模式 / 影院模式）。深色底用普通混合才能"发光"，
-  // 浅色底用 multiply 才不会把文字糊成一片。
-  let __darkBgCache = null;
-  let __darkBgTs = 0;
-  function isDarkPage() {
-    const now = performance.now();
-    if (__darkBgCache !== null && now - __darkBgTs < 1500) return __darkBgCache;
-    let dark = false;
-    try {
-      const bg = getComputedStyle(document.body).backgroundColor || '';
-      const m = bg.match(/\d+(\.\d+)?/g);
-      if (m && m.length >= 3) {
-        dark = 0.299 * +m[0] + 0.587 * +m[1] + 0.114 * +m[2] < 90;
-      }
-    } catch (e) { /* ignore */ }
-    __darkBgCache = dark;
-    __darkBgTs = now;
-    return dark;
-  }
+  // 1.4.35：isDarkPage() 及缓存已删除 —— 早期按页面背景亮度切混合模式用；混合模式现在固定为 normal，这个判断没人用了
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const num = (v, d) => (Number.isFinite(+v) ? +v : d);
 
@@ -75,23 +61,106 @@
     mode: 'sweep',    // sweep = 径向反查 1:1（默认）/ mirror = 镜像 / clamp = 边缘拉伸(原版)
     expand: 120,      // 光晕扩散范围（占视口短边百分比，120 = 铺满屏幕）
     blur: 32,         // 模糊强度 0..100
-    opacity: 92,      // 光晕不透明度 0..100
+    opacity: 100,     // 光晕不透明度 0..100
     lookback: 1.0,    // 镜像模式的折叠倍率
-    fadeStart: 0.12,  // alpha 开始衰减的位置（0=边缘，1=最外）
-    fadeCurve: 0.85,  // 衰减曲线
+    // 渐变起点 / 曲线：来自原版 spreadFadeStart(15) / spreadFadeCurve(35)，
+    // 换算成 fadeStart = spreadFadeStart/100、fadeCurve = 16/(curve*0.64)。
+    // 已不暴露成滑块，值固定。改这两个会影响光晕往外淡出的形状。
+    fadeStart: 0.12,
+    fadeCurve: 0.85,
     brightness: 100,
-    contrast: 104,
-    saturation: 112,
+    contrast: 100,
+    saturation: 100,
     vibrance: 100,
     resolution: 60,   // 采样纹理分辨率（占原视频宽百分比）
     maxFps: 30,
     dither: 0,        // 抖动强度 0..100（默认关，避免颗粒感）
+    radius: 50,       // 圆角 0..100：0=直角(B站原生)，50=12px(YouTube)，100=24px
+    // B 站：视频四边做 alpha 渐隐，让边缘溶进下面的光晕（等价 YouTube 的向内羽化）
+    edgeFade: true,
+    // 渐隐宽度 = blurPx × 这个倍数。30 = 0.3×；改这里就是改默认手感。
+    edgeFadeScale: 30,
+    lang: 'zh',       // 面板语言：zh / en
   };
+
+  /* =========================================================================
+   * 面板文案（中 / 英）
+   * ========================================================================= */
+  const I18N = {
+    zh: {
+      title: '氛围灯 · 径向反查',
+      lang: '语言',
+      enabled: '启用',
+      hint: '以画面中心为极点沿半径反查：光晕往外延展多少，就往画面里回查多少（1:1），贴着画面处取边界色。',
+      mode: '采样方式',
+      mode_sweep: '径向反查 1:1（默认）',
+      mode_mirror: '镜像折叠',
+      mode_clamp: '边缘拉伸（原版）',
+      radius: '圆角（仅B站生效）',
+      radiusNote: '0=直角(B站原生) / 50=12px(YouTube) / 100=24px(更圆)',
+      expand: '扩散范围',
+      blur: '模糊',
+      opacity: '不透明度',
+      lookback: '折叠倍率（镜像）',
+      lookbackNote: '仅「镜像」模式生效',
+      fadeStart: '渐变起点',
+      fadeCurve: '渐变曲线',
+      brightness: '亮度',
+      contrast: '对比度',
+      saturation: '饱和度',
+      vibrance: '色彩（自然饱和度）',
+      resolution: '采样分辨率',
+      maxFps: '帧率上限',
+      dither: '抖动（去色带）',
+      edgeFade: '边缘渐隐',
+      edgeFadeScale: '视频边框渐隐',
+      statusBlocked: '该视频受跨域限制，无法读取画面'
+    },
+    en: {
+      title: 'Ambient Light · Radial Sampling',
+      lang: 'Language',
+      enabled: 'Enabled',
+      hint: 'Polar sampling: the glow reaches outward by the same distance it looks back into the frame (1:1), so the halo keeps the colors of the real edge pixels.',
+      mode: 'Sampling mode',
+      mode_sweep: 'Radial 1:1 (default)',
+      mode_mirror: 'Mirror fold',
+      mode_clamp: 'Edge stretch (original)',
+      radius: 'Corner radius (Bilibili only)',
+      radiusNote: '0 = square (native) / 50 = 12px (YouTube) / 100 = 24px',
+      expand: 'Spread',
+      blur: 'Blur',
+      opacity: 'Opacity',
+      lookback: 'Fold ratio (mirror)',
+      lookbackNote: 'Only in Mirror mode',
+      fadeStart: 'Fade start',
+      fadeCurve: 'Fade curve',
+      brightness: 'Brightness',
+      contrast: 'Contrast',
+      saturation: 'Saturation',
+      vibrance: 'Vibrance',
+      resolution: 'Sampling resolution',
+      maxFps: 'Frame rate cap',
+      dither: 'Dither',
+      edgeFade: 'Edge fade',
+      edgeFadeScale: 'Video border fade',
+      statusBlocked: 'Cross-origin video: frames cannot be read'
+    }
+  };
+
+  function t(key) {
+    const lang = settings && settings.lang === 'en' ? 'en' : 'zh';
+    return (I18N[lang] && I18N[lang][key]) || I18N.zh[key] || key;
+  }
 
   const settings = loadSettings();
   function loadSettings() {
     let raw = {};
     try { raw = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch (e) { raw = {}; }
+    // 迁移：这三个的旧默认值是 92 / 104 / 112，新默认值统一为 100。
+    // 仅当用户从未改动过（仍是旧默认值）时才重置，不会覆盖手调过的值。
+    if (raw && raw.opacity === 92 && raw.contrast === 104 && raw.saturation === 112) {
+      delete raw.opacity; delete raw.contrast; delete raw.saturation;
+    }
     const out = Object.assign({}, DEFAULTS, raw || {});
     for (const k of Object.keys(DEFAULTS)) {
       if (typeof DEFAULTS[k] === 'number') out[k] = num(out[k], DEFAULTS[k]);
@@ -517,6 +586,90 @@ bili-comment-pictures-upload {
   box-shadow: none !important;
 }
 
+/* ── 右侧推荐栏：这里曾经有一条 position:relative + z-index:20，
+       目的是让推荐栏盖住「边缘羽化层」(z-index 15，环宽 400px 会压到推荐栏)。
+       羽化层在 1.4.24 已删除，这条规则失去对象，只剩副作用：
+       它让 .right-container 自己形成层叠上下文，把 B 站的小窗压在了下面。
+       光晕现在在 z-index:-1，任何页面内容都天然盖在它上面，不需要这条。 ── */
+
+/* ── 播放器圆角（变量由面板滑块控制）── */
+.bpx-player-video-area,
+.bpx-player-video-perch,
+.bpx-player-video-wrap {
+  border-radius: var(--ambi-radius, 12px) !important;
+  overflow: hidden !important;
+}
+
+/* ── 视频边缘渐隐：四边做成半透明，露出下面光晕里的「模糊画面」 ──
+   等价于 YouTube 版的向内羽化 —— 那边是擦掉光晕上的画面边缘，
+   这边是让视频边缘自己变透明，方向相反、结果相同。
+   两个方向的线性渐变取交集：四边渐隐、中间保持完全不透明。
+   宽度由 --ambi-edge-fade 控制，JS 按模糊强度写入（模糊越大越宽）。 */
+/* 开关：只有 html 上带 data-ambi-edgefade="1" 时才生效（面板里的「边缘渐隐」）。
+   色标位置全部按 --ambi-edge-fade 换算，只有四边那一条渐隐，中间必须完全不透明。
+   alpha 走缓动而不是直线：直线渐变在中段掉得太快，视觉上仍然是一条明显的边。 */
+:root[data-ambi-edgefade="1"] .bpx-player-video-area video,
+:root[data-ambi-edgefade="1"] .bpx-player-video-wrap video {
+  -webkit-mask-image:
+    linear-gradient(to bottom,
+      transparent 0,
+      rgba(0,0,0,.06) calc(var(--ambi-edge-fade, 12px) * .16),
+      rgba(0,0,0,.24) calc(var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.56) calc(var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.84) calc(var(--ambi-edge-fade, 12px) * .74),
+      #000 var(--ambi-edge-fade, 12px),
+      #000 calc(100% - var(--ambi-edge-fade, 12px)),
+      rgba(0,0,0,.84) calc(100% - var(--ambi-edge-fade, 12px) * .74),
+      rgba(0,0,0,.56) calc(100% - var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.24) calc(100% - var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.06) calc(100% - var(--ambi-edge-fade, 12px) * .16),
+      transparent 100%),
+    linear-gradient(to right,
+      transparent 0,
+      rgba(0,0,0,.06) calc(var(--ambi-edge-fade, 12px) * .16),
+      rgba(0,0,0,.24) calc(var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.56) calc(var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.84) calc(var(--ambi-edge-fade, 12px) * .74),
+      #000 var(--ambi-edge-fade, 12px),
+      #000 calc(100% - var(--ambi-edge-fade, 12px)),
+      rgba(0,0,0,.84) calc(100% - var(--ambi-edge-fade, 12px) * .74),
+      rgba(0,0,0,.56) calc(100% - var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.24) calc(100% - var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.06) calc(100% - var(--ambi-edge-fade, 12px) * .16),
+      transparent 100%);
+  -webkit-mask-composite: source-in;
+  -webkit-mask-size: 100% 100%;
+  mask-image:
+    linear-gradient(to bottom,
+      transparent 0,
+      rgba(0,0,0,.06) calc(var(--ambi-edge-fade, 12px) * .16),
+      rgba(0,0,0,.24) calc(var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.56) calc(var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.84) calc(var(--ambi-edge-fade, 12px) * .74),
+      #000 var(--ambi-edge-fade, 12px),
+      #000 calc(100% - var(--ambi-edge-fade, 12px)),
+      rgba(0,0,0,.84) calc(100% - var(--ambi-edge-fade, 12px) * .74),
+      rgba(0,0,0,.56) calc(100% - var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.24) calc(100% - var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.06) calc(100% - var(--ambi-edge-fade, 12px) * .16),
+      transparent 100%),
+    linear-gradient(to right,
+      transparent 0,
+      rgba(0,0,0,.06) calc(var(--ambi-edge-fade, 12px) * .16),
+      rgba(0,0,0,.24) calc(var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.56) calc(var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.84) calc(var(--ambi-edge-fade, 12px) * .74),
+      #000 var(--ambi-edge-fade, 12px),
+      #000 calc(100% - var(--ambi-edge-fade, 12px)),
+      rgba(0,0,0,.84) calc(100% - var(--ambi-edge-fade, 12px) * .74),
+      rgba(0,0,0,.56) calc(100% - var(--ambi-edge-fade, 12px) * .54),
+      rgba(0,0,0,.24) calc(100% - var(--ambi-edge-fade, 12px) * .34),
+      rgba(0,0,0,.06) calc(100% - var(--ambi-edge-fade, 12px) * .16),
+      transparent 100%);
+  mask-composite: intersect;
+  mask-size: 100% 100%;
+}
+
 /* ── 顶栏搜索框 ── */
 #nav-searchform .nav-search-content,
 #nav-searchform .nav-search-input,
@@ -538,18 +691,35 @@ bili-comment-pictures-upload {
 }
 `;
 
+  /** 圆角：0..100 映射到 0..24px（50 = 12px = YouTube 桌面播放器的圆角）。 */
+  function applyRadius() {
+    const px = Math.round(clamp(settings.radius, 0, 100) * 0.24);
+    document.documentElement.style.setProperty('--ambi-radius', px + 'px');
+  }
+
+  /**
+   * 视频边缘渐隐开关（仅 B 站）。
+   * BILI_SURFACE_CSS 里那两条 mask 规则挂在 html[data-ambi-edgefade="1"] 上，
+   * 所以这里只切一个 data 属性，不用反复注入/删除 style 标签。
+   */
+  function applyEdgeFade() {
+    if (!IS_BILIBILI) return;
+    if (settings.edgeFade) document.documentElement.dataset.ambiEdgefade = '1';
+    else delete document.documentElement.dataset.ambiEdgefade;
+  }
+
   function ensureBiliSurfacesTransparent() {
     if (!IS_BILIBILI) return;
-    if (document.getElementById('ambi-mirror-bili-css')) return;
+    if (document.getElementById('ambi-mirror-bili-css-dev')) return;
     const st = document.createElement('style');
-    st.id = 'ambi-mirror-bili-css';
+    st.id = 'ambi-mirror-bili-css-dev';
     st.textContent = BILI_SURFACE_CSS;
     (document.head || document.documentElement).appendChild(st);
   }
 
   function makeCanvas(host) {
     const c = document.createElement('canvas');
-    c.id = 'ambi-mirror-canvas';
+    c.id = 'ambi-mirror-canvas-dev';
     c.setAttribute('aria-hidden', 'true');
     Object.assign(c.style, {
       position: 'fixed',
@@ -567,9 +737,9 @@ bili-comment-pictures-upload {
       border: '0',
       background: 'transparent',
     });
-    // B 站：挂到 body（Vue 管不到的地方）并插在 body 的【最前面】。
-    // 关键：canvas 是 z-index:0，页面内容大多是 z-index:auto，两者同一层按 DOM 顺序排列，
-    // 所以必须让 canvas 排在 #app 之前，页面内容才会盖在光晕上面（否则光晕会盖住推荐栏）。
+    // B 站：挂到 body（Vue 管不到的地方），靠负 z-index 沉到页面内容下面。
+    // 插在 body 最前面只是稳妥习惯 —— 真正起作用的是 z-index:-1 加上
+    // attach() 里给 body 设的 isolation:isolate，不是 DOM 顺序。
     // YouTube：直接叠在播放器最上层，画面本体在着色器里已 discard，不会挡住视频。
     if (IS_BILIBILI && host === document.body) {
       host.insertBefore(c, host.firstChild);
@@ -695,7 +865,7 @@ bili-comment-pictures-upload {
       const msg = String((err && (err.name + ' ' + err.message)) || err);
       if (/security|tainted|cross-origin/i.test(msg)) {
         state.blocked = true;
-        setStatus('该视频受跨域限制，无法读取画面');
+        setStatus(t('statusBlocked'));
       }
     }
   }
@@ -724,13 +894,10 @@ bili-comment-pictures-upload {
     gl.bindTexture(gl.TEXTURE_2D, state.tex);
 
     const u = state.u;
-    // 光晕衰减范围（以画面高度为单位）：
-    //   YouTube：用视口短边，铺满全屏；
-    //   B 站：参考原版几何，只贴在播放器周围（视频短边的 18%），
-    //         不做全屏扩散，否则一定会盖住标题 / 推荐列表 / 评论。
-    const expandPx = Math.max(1, IS_BILIBILI
-      ? Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100
-      : Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
+    // 光晕衰减范围：按视口短边算，两个平台一致（120% ≈ 铺满全屏）。
+    // 早期这里给 B 站单独收窄过，怕盖住标题 / 推荐 / 评论；后来改用
+    // 「body isolation + #app 透明 + 负 z-index」解决遮挡，就不需要收窄了。
+    const expandPx = Math.max(1, Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
     const expandHi = expandPx / L.dispH;
 
     const rectMinX = L.rectMinX;
@@ -759,8 +926,7 @@ bili-comment-pictures-upload {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    // B 站：混合模式固定为普通叠加（不用 multiply，避免把页面压暗）；
-    // 浅色页面靠收窄扩散范围来避免糊住文字，见下面的 expandPx。
+    // 混合模式固定为普通叠加。multiply 会压暗页面、screen 会泛白，两个都试过并否决了。
 
     // —— 浏览器原生高斯模糊（参考原版：2D canvas + ctx.filter）
     const dctx = state.dctx;
@@ -768,33 +934,77 @@ bili-comment-pictures-upload {
     if (dctx && out) {
       // 原版公式：blurPx = blur2 * (height / 512) * 1.275
       const blurPx = settings.blur * (state.ch / 512) * 1.275;
+
+      // 视频边缘渐隐的宽度跟着模糊走：模糊越大，边缘越宽地溶进光晕。
+      // 只在值变化时写 CSS 变量，避免每帧触发样式重算。
+      if (IS_BILIBILI) {
+        // 交界线不是 alpha 断开造成的，而是「清晰视频 ↔ 大模糊光晕」的质地落差，
+        // 带宽必须够大才摊得平。宽度 = blurPx × (渐隐程度/100)，面板可调。
+        const scale = clamp(settings.edgeFadeScale, 0, 200) / 100;
+        const fadeCss = Math.round(clamp(blurPx * scale, 0, 160));
+        if (state.lastEdgeFadePx !== fadeCss) {
+          state.lastEdgeFadePx = fadeCss;
+          document.documentElement.style.setProperty('--ambi-edge-fade', fadeCss + 'px');
+        }
+      }
       dctx.filter = blurPx > 0.5 ? 'blur(' + blurPx.toFixed(2) + 'px)' : 'none';
       dctx.clearRect(0, 0, out.width, out.height);
       dctx.drawImage(state.glCanvas, 0, 0, out.width, out.height);
       dctx.filter = 'none';
 
-      // 把画面区域挖掉，露出上面的 <video>；这样光晕只留在画面之外，边缘不会被压暗
-      const px = rectMinX * out.width;
-      const py = rectMinY * out.height;
-      const pw = rectSizeX * out.width;
-      const ph = rectSizeY * out.height;
-      // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
-      // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
-      // 溶解宽度 = 模糊半径，但最多吃掉画面短边的 12%，避免大模糊时画面被吞掉
-      const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
-      dctx.globalCompositeOperation = 'destination-out';
-      dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
-      dctx.fillStyle = '#000';
-      dctx.fillRect(px + feather * 0.5, py + feather * 0.5,
-                    Math.max(1, pw - feather), Math.max(1, ph - feather));
-      dctx.filter = 'none';
-      dctx.globalCompositeOperation = 'source-over';
 
-      // B 站：光晕照常铺满整页，不做任何裁剪。
-      // 页面内容之所以能盖住它，靠的是「body isolation + #app 透明 + 负 z-index」这套层叠，
-      // 以及页面自身容器（如 .right-container-inner）的实色背景。
+      // —— 挖洞：只给 YouTube 用 ——
+      // YouTube 的光晕在视频【上方】，不挖洞光晕会盖住画面，必须挖。
+      // B 站的光晕在视频【下方】（z-index:-1），视频本来就把它盖住了，挖洞纯属多余。
+      // 而且挖洞的羽化模糊会把边界外侧的 alpha 从 1 啃到 0.9 左右，透出 body 底色 ——
+      // 视频外面那圈"阴影"就是这么来的。不挖洞之后：
+      //   ① 边界 alpha = 1，一点底色都不透
+      //   ② 视频圆角处露出的是「画面那个角本身」（着色器里画面矩形内直接贴图），
+      //      不是 body 的深色，所以圆角黑角也一并消失，不需要任何垫底图层。
+      if (!IS_BILIBILI) {
+        const px = rectMinX * out.width;
+        const py = rectMinY * out.height;
+        const pw = rectSizeX * out.width;
+        const ph = rectSizeY * out.height;
+        // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
+        // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
+        // 溶解宽度 = 模糊半径，但最多吃掉画面短边的 12%，避免大模糊时画面被吞掉
+        const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
+        dctx.globalCompositeOperation = 'destination-out';
+        dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
+        dctx.fillStyle = '#000';
+        // 圆角挖洞：YouTube 播放器本身是圆角（12px），直角挖洞会把四角也挖掉，
+        // 露出下面的深色页面背景 —— 就是模糊调小 / 为 0 时看到的那几个黑角。
+        {
+          const rx0 = px + feather * 0.5;
+          const ry0 = py + feather * 0.5;
+          const rw = Math.max(1, pw - feather);
+          const rh = Math.max(1, ph - feather);
+          const dprYt = Math.min(2, window.devicePixelRatio || 1);
+          const rrYt = Math.max(0, Math.min(12 * dprYt, Math.min(rw, rh) / 2));
+          dctx.beginPath();
+          if (rrYt > 0.5 && typeof dctx.roundRect === 'function') {
+            dctx.roundRect(rx0, ry0, rw, rh, rrYt);
+          } else {
+            dctx.rect(rx0, ry0, rw, rh);
+          }
+          dctx.fill();
+        }
+        dctx.filter = 'none';
+        dctx.globalCompositeOperation = 'source-over';
+      }
     }
+
+    // 到这里光晕就画完了。两个平台的区别只在这一步：
+    //   YouTube —— 画布在视频上方，必须把画面矩形挖掉，视频才透得出来；
+    //   B 站 —— 画布在视频下方，什么都不用擦，视频自己盖在上面。
   }
+
+  // 1.4.35：drawBackdrop（全屏投影底）已删除 —— 会在滚动时错位，1.4.9 就被否决了
+
+  // 1.4.35：drawVideoBackdrop（视频底）已删除 —— 同上，圆角现在由「画面矩形的本色贴图 + 视频自身圆角」兜住
+
+  // 1.4.35：drawEdgeFeather（边缘羽化环）已删除 —— 它是在给「挖洞削掉的 alpha」打补丁，1.4.26 让 B 站不再挖洞后就没有存在意义了
 
   function tick(ts) {
     state.rafId = requestAnimationFrame(tick);
@@ -846,6 +1056,8 @@ bili-comment-pictures-upload {
     }
     state.host = null;
     if (state.canvas) { state.canvas.remove(); state.canvas = null; }
+    if (state.edgeCanvas) { state.edgeCanvas.remove(); state.edgeCanvas = null; state.edgeCtx = null; }
+    if (state.backdropCanvas) { state.backdropCanvas.remove(); state.backdropCanvas = null; state.backdropCtx = null; }
     state.dctx = null;
     state.glCanvas = null;
     if (state.gl) { try { state.gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch (e) {} }
@@ -866,6 +1078,14 @@ bili-comment-pictures-upload {
     // 只有「同一个 video 且已经成功启动」才跳过；启动失败过就允许重试
     if (state.video === video && state.started) return;
     deinit();
+
+    // 收掉旧版本残留在 DOM 里的辅助画布（1.4.24 / 1.4.26 删掉的那两层）。
+    // state 里已经没有它们的引用，只能按 id 找 —— 不清理的话，升级脚本之后
+    // 旧画布会一直挂在页面上，看起来就像「改了没生效」。
+    ['ambi-mirror-edge-dev', 'ambi-mirror-backdrop-dev'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    });
 
     state.video = video;
     state.host = pickHost(video);
@@ -888,9 +1108,20 @@ bili-comment-pictures-upload {
       }
       ensureSidebarOpaque();
       ensureBiliSurfacesTransparent();
+      applyRadius();
+      applyEdgeFade();
     }
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+    // 投影底 / 视频底：已停用，画布也不再创建。
+    // 这层画布比视频大一圈，边界是硬矩形，会在视频外围留下一圈看得见的框。
+    // （deinit() 里对 backdropCanvas 的清理保留，用来收掉旧版本残留的元素。）
+
+    // 边缘羽化层：已停用，画布也不再创建。
+    // drawEdgeFeather() 用的矩形画布本身就是一圈看得见的「框」，只停用绘制
+    // 却留着空画布会让人分不清到底哪层在出问题，所以连元素一起去掉。
+    // （deinit() 里对 edgeCanvas 的清理保留，用来收掉旧版本残留的元素。）
 
     // WebGL 渲染到一张离屏画布，再由 2D 层用 ctx.filter='blur()' 做浏览器原生高斯模糊
     // （和原版一致：不在着色器里多 tap 采样，所以完全没有颗粒噪点）
@@ -1058,12 +1289,14 @@ bili-comment-pictures-upload {
   `;
 
   const CONTROLS = [
+    { key: 'radius', label: '圆角（仅B站生效）', min: 0, max: 100, step: 1, unit: '', note: '0=直角(B站原生) / 50=12px(YouTube) / 100=24px(更圆)' },
     { key: 'expand', label: '扩散范围', min: 10, max: 300, step: 5, unit: '%' },
     { key: 'blur', label: '模糊', min: 0, max: 100, step: 1, unit: '' },
+    { key: 'edgeFadeScale', label: '视频边框渐隐', min: 0, max: 200, step: 5, unit: '%', biliOnly: true },
     { key: 'opacity', label: '不透明度', min: 0, max: 100, step: 1, unit: '%' },
     { key: 'lookback', label: '折叠倍率（镜像）', min: 0.2, max: 3, step: 0.05, unit: '×', note: '仅「镜像」模式生效' },
-    { key: 'fadeStart', label: '渐变起点', min: 0, max: 0.9, step: 0.01, unit: '' },
-    { key: 'fadeCurve', label: '渐变曲线', min: 0.2, max: 3, step: 0.05, unit: '' },
+    // 渐变起点 / 渐变曲线不再暴露成滑块：这两个是纯审美参数，
+    // 调了也看不出明显差别，值和原版换算是定死的（见 DEFAULTS）。
     { key: 'brightness', label: '亮度', min: 0, max: 200, step: 1, unit: '%' },
     { key: 'contrast', label: '对比度', min: 40, max: 200, step: 1, unit: '%' },
     { key: 'saturation', label: '饱和度', min: 0, max: 200, step: 1, unit: '%' },
@@ -1093,21 +1326,51 @@ bili-comment-pictures-upload {
     panel.className = 'panel';
 
     const title = document.createElement('h3');
-    title.textContent = '氛围灯 · 径向反查';
+    title.textContent = t('title') + ' · v' + SCRIPT_VERSION;
     panel.appendChild(title);
+
+    // 语言切换
+    {
+      const langRow = document.createElement('div');
+      langRow.className = 'row';
+      const langLab = document.createElement('label');
+      langLab.textContent = t('lang');
+      const langSel = document.createElement('select');
+      langSel.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.08);color:#e6e6e8;' +
+        'border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:4px 6px;font-size:11.5px;outline:none;';
+      [['zh', '中文'], ['en', 'English']].forEach(([v, txt]) => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = txt;
+        if ((settings.lang || 'zh') === v) o.selected = true;
+        langSel.appendChild(o);
+      });
+      langSel.addEventListener('change', () => {
+        settings.lang = langSel.value;
+        saveSettings();
+        const old = document.getElementById('ambi-mirror-root');
+        if (old) old.remove();
+        shadowRoot = null;
+        createPanel();
+      });
+      langRow.appendChild(langLab);
+      langRow.appendChild(langSel);
+      panel.appendChild(langRow);
+    }
 
     // 总开关
     const swRow = document.createElement('div');
     swRow.className = 'row';
     // 注意：YouTube 开启了 Trusted Types，不能给 innerHTML 赋字符串，这里全部用 DOM API
     const swLabel = document.createElement('label');
-    swLabel.textContent = '启用';
+    swLabel.textContent = t('enabled');
     swLabel.style.cssText = 'font-weight:600;color:#e8e8ea';
     swRow.appendChild(swLabel);
     const sw = document.createElement('div');
     sw.className = 'switch';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
+    cb.dataset.key = 'enabled';
     cb.checked = settings.enabled;
     cb.addEventListener('change', () => {
       settings.enabled = cb.checked;
@@ -1120,25 +1383,25 @@ bili-comment-pictures-upload {
 
     const hint = document.createElement('div');
     hint.className = 'hint';
-    hint.textContent = '以画面中心为极点沿半径反查：光晕';
+    hint.textContent = t('hint');
     const hintStrong = document.createElement('b');
-    hintStrong.textContent = '往外延展多少，就往画面里回查多少（1:1）';
+    hintStrong.textContent = '';
     hint.appendChild(hintStrong);
-    hint.appendChild(document.createTextNode('，贴着画面处取边界色。'));
+    
     panel.appendChild(hint);
 
     // 采样方式
     const modeRow = document.createElement('div');
     modeRow.className = 'row';
     const modeLab = document.createElement('label');
-    modeLab.textContent = '采样方式';
+    modeLab.textContent = t('mode');
     const sel = document.createElement('select');
     sel.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,.08);color:#e6e6e8;' +
       'border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:4px 6px;font-size:11.5px;outline:none;';
-    [['sweep', '径向反查 1:1（默认）'], ['mirror', '镜像折叠'], ['clamp', '边缘拉伸（原版）']].forEach(([v, txt]) => {
+    [['sweep', 'mode_sweep'], ['mirror', 'mode_mirror'], ['clamp', 'mode_clamp']].forEach(([v, txtKey]) => {
       const o = document.createElement('option');
       o.value = v;
-      o.textContent = txt;
+      o.textContent = t(txtKey);
       if (settings.mode === v) o.selected = true;
       sel.appendChild(o);
     });
@@ -1151,16 +1414,44 @@ bili-comment-pictures-upload {
     modeRow.appendChild(sel);
     panel.appendChild(modeRow);
 
+    // 边缘渐隐开关（仅 B 站；YouTube 的等效做法试过两版都看不出差别，已放弃）
+    if (IS_BILIBILI) {
+      const efRow = document.createElement('div');
+      efRow.className = 'row';
+      const efLab = document.createElement('label');
+      efLab.textContent = t('edgeFade');
+      const efSw = document.createElement('div');
+      efSw.className = 'switch';
+      const efCb = document.createElement('input');
+      efCb.type = 'checkbox';
+      efCb.dataset.key = 'edgeFade';
+      efCb.checked = !!settings.edgeFade;
+      efCb.addEventListener('change', () => {
+        settings.edgeFade = efCb.checked;
+        saveSettings();
+        applyEdgeFade();
+        state.lastRect = null;
+        state.needDraw = true;
+      });
+      efSw.appendChild(efCb);
+      efRow.appendChild(efLab);
+      efRow.appendChild(efSw);
+      panel.appendChild(efRow);
+    }
+
     // 滑块
     for (const c of CONTROLS) {
+      // 仅 B 站生效的项（渐隐程度）在 YouTube 上不渲染
+      if (c.biliOnly && !IS_BILIBILI) continue;
       const row = document.createElement('div');
       row.className = 'row';
       const lab = document.createElement('label');
-      lab.textContent = c.label;
+      lab.textContent = t(c.key);
       const val = document.createElement('span');
       val.className = 'val';
       const input = document.createElement('input');
       input.type = 'range';
+      input.dataset.key = c.key;   // 「恢复默认」按 key 对号，不再依赖索引顺序
       input.min = c.min;
       input.max = c.max;
       input.step = c.step;
@@ -1180,6 +1471,7 @@ bili-comment-pictures-upload {
         shown();
         saveSettings();
         state.needDraw = true;
+        if (c.key === 'radius') applyRadius();
       });
 
       const box = document.createElement('div');
@@ -1190,11 +1482,11 @@ bili-comment-pictures-upload {
       row.appendChild(box);
       panel.appendChild(row);
 
-      if (c.note) {
+      if (c.noteKey || c.key === 'radius' || c.key === 'lookback') {
         const n = document.createElement('div');
         n.className = 'hint';
         n.style.margin = '-2px 0 6px';
-        n.textContent = c.note;
+        n.textContent = t(c.key + 'Note');
         panel.appendChild(n);
       }
     }
@@ -1207,10 +1499,18 @@ bili-comment-pictures-upload {
     reset.addEventListener('click', () => {
       Object.assign(settings, DEFAULTS);
       saveSettings();
-      shadow.querySelectorAll('input[type=range]').forEach((el, i) => {
-        el.value = settings[CONTROLS[i].key];
+      // 滑块按 data-key 恢复，不能用 CONTROLS[i] —— 因为 biliOnly 的项
+      // 在 YouTube 上不渲染，两边索引对不上
+      shadow.querySelectorAll('input[type=range][data-key]').forEach((el) => {
+        el.value = settings[el.dataset.key];
         el.dispatchEvent(new Event('input'));
       });
+      // 复选框也要跟着恢复，否则面板显示和实际设置对不上（启用 / 边缘渐隐）
+      shadow.querySelectorAll('input[type=checkbox][data-key]').forEach((el) => {
+        el.checked = !!settings[el.dataset.key];
+      });
+      applyRadius();
+      applyEdgeFade();
       state.needDraw = true;
     });
     const close = document.createElement('button');
@@ -1320,5 +1620,25 @@ bili-comment-pictures-upload {
   }
 
   // 方便在控制台里调试
-  window.__ambiMirror = { state, settings, bootstrap, attach, deinit, saveSettings };
+  window.__ambiMirror = {
+    version: SCRIPT_VERSION,
+    state,
+    settings,
+    bootstrap,
+    attach,
+    deinit,
+    saveSettings,
+    // 排查那圈「框」用的：把三张画布各自的实际状态打出来
+    layers() {
+      return ['ambi-mirror-canvas-dev', 'ambi-mirror-backdrop-dev', 'ambi-mirror-edge-dev']
+        .map((id) => {
+          const el = document.getElementById(id);
+          if (!el) return id + ' 不存在';
+          const s = getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          return id + ' display=' + s.display + ' z=' + s.zIndex +
+            ' rect=' + [r.left, r.top, r.width, r.height].map((n) => Math.round(n)).join(',');
+        });
+    },
+  };
 })();
