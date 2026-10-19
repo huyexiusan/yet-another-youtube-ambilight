@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.28-dev
+// @version      1.4.29-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.28-dev';
+  const SCRIPT_VERSION = '1.4.29-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -93,6 +93,8 @@
     maxFps: 30,
     dither: 0,        // 抖动强度 0..100（默认关，避免颗粒感）
     radius: 50,       // 圆角 0..100：0=直角(B站原生)，50=12px(YouTube)，100=24px
+    // B 站：视频四边做 alpha 渐隐，让边缘溶进下面的光晕（等价 YouTube 的向内羽化）
+    edgeFade: true,
     lang: 'zh',       // 面板语言：zh / en
   };
 
@@ -125,6 +127,7 @@
       resolution: '采样分辨率',
       maxFps: '帧率上限',
       dither: '抖动（去色带）',
+      edgeFade: '边缘渐隐（仅B站）',
       statusBlocked: '该视频受跨域限制，无法读取画面'
     },
     en: {
@@ -152,6 +155,7 @@
       resolution: 'Sampling resolution',
       maxFps: 'Frame rate cap',
       dither: 'Dither',
+      edgeFade: 'Edge fade (Bilibili only)',
       statusBlocked: 'Cross-origin video: frames cannot be read'
     }
   };
@@ -614,8 +618,9 @@ bili-comment-pictures-upload {
    这边是让视频边缘自己变透明，方向相反、结果相同。
    两个方向的线性渐变取交集：四边渐隐、中间保持完全不透明。
    宽度由 --ambi-edge-fade 控制，JS 按模糊强度写入（模糊越大越宽）。 */
-.bpx-player-video-area video,
-.bpx-player-video-wrap video {
+/* 开关：只有 html 上带 data-ambi-edgefade="1" 时才生效（面板里的「边缘渐隐」）。 */
+:root[data-ambi-edgefade="1"] .bpx-player-video-area video,
+:root[data-ambi-edgefade="1"] .bpx-player-video-wrap video {
   -webkit-mask-image:
     linear-gradient(to bottom, transparent 0, #000 var(--ambi-edge-fade, 12px),
                     #000 calc(100% - var(--ambi-edge-fade, 12px)), transparent 100%),
@@ -657,6 +662,17 @@ bili-comment-pictures-upload {
   function applyRadius() {
     const px = Math.round(clamp(settings.radius, 0, 100) * 0.24);
     document.documentElement.style.setProperty('--ambi-radius', px + 'px');
+  }
+
+  /**
+   * 视频边缘渐隐开关（仅 B 站）。
+   * BILI_SURFACE_CSS 里那两条 mask 规则挂在 html[data-ambi-edgefade="1"] 上，
+   * 所以这里只切一个 data 属性，不用反复注入/删除 style 标签。
+   */
+  function applyEdgeFade() {
+    if (!IS_BILIBILI) return;
+    if (settings.edgeFade) document.documentElement.dataset.ambiEdgefade = '1';
+    else delete document.documentElement.dataset.ambiEdgefade;
   }
 
   function ensureBiliSurfacesTransparent() {
@@ -894,8 +910,8 @@ bili-comment-pictures-upload {
       // 只在值变化时写 CSS 变量，避免每帧触发样式重算。
       if (IS_BILIBILI) {
         const fadeCss = Math.round(clamp(blurPx * 0.5, 10, 48));
-        if (state.edgeFade !== fadeCss) {
-          state.edgeFade = fadeCss;
+        if (state.lastEdgeFadePx !== fadeCss) {
+          state.lastEdgeFadePx = fadeCss;
           document.documentElement.style.setProperty('--ambi-edge-fade', fadeCss + 'px');
         }
       }
@@ -1242,6 +1258,7 @@ bili-comment-pictures-upload {
       ensureSidebarOpaque();
       ensureBiliSurfacesTransparent();
       applyRadius();
+      applyEdgeFade();
     }
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
@@ -1501,6 +1518,7 @@ bili-comment-pictures-upload {
     sw.className = 'switch';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
+    cb.dataset.key = 'enabled';
     cb.checked = settings.enabled;
     cb.addEventListener('change', () => {
       settings.enabled = cb.checked;
@@ -1543,6 +1561,29 @@ bili-comment-pictures-upload {
     modeRow.appendChild(modeLab);
     modeRow.appendChild(sel);
     panel.appendChild(modeRow);
+
+    // 边缘渐隐开关（仅 B 站）
+    if (IS_BILIBILI) {
+      const efRow = document.createElement('div');
+      efRow.className = 'row';
+      const efLab = document.createElement('label');
+      efLab.textContent = t('edgeFade');
+      const efSw = document.createElement('div');
+      efSw.className = 'switch';
+      const efCb = document.createElement('input');
+      efCb.type = 'checkbox';
+      efCb.dataset.key = 'edgeFade';
+      efCb.checked = !!settings.edgeFade;
+      efCb.addEventListener('change', () => {
+        settings.edgeFade = efCb.checked;
+        saveSettings();
+        applyEdgeFade();
+      });
+      efSw.appendChild(efCb);
+      efRow.appendChild(efLab);
+      efRow.appendChild(efSw);
+      panel.appendChild(efRow);
+    }
 
     // 滑块
     for (const c of CONTROLS) {
@@ -1605,6 +1646,12 @@ bili-comment-pictures-upload {
         el.value = settings[CONTROLS[i].key];
         el.dispatchEvent(new Event('input'));
       });
+      // 复选框也要跟着恢复，否则面板显示和实际设置对不上（启用 / 边缘渐隐）
+      shadow.querySelectorAll('input[type=checkbox][data-key]').forEach((el) => {
+        el.checked = !!settings[el.dataset.key];
+      });
+      applyRadius();
+      applyEdgeFade();
       state.needDraw = true;
     });
     const close = document.createElement('button');
