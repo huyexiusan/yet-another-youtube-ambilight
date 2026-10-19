@@ -1,4 +1,4 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
 // @version      1.4.5-dev
@@ -845,8 +845,10 @@ bili-comment-pictures-upload {
     const sh = (h / vh) * glH;
 
     ectx.setTransform(1, 0, 0, 1, 0, 0);
-    // 必须和大光晕用同样的模糊，否则环内外的过渡不连续，看起来像给视频套了个框
-    ectx.filter = blurPx > 0.5 ? 'blur(' + blurPx.toFixed(2) + 'px)' : 'none';
+    // 环内只做轻微模糊：颜色要尽量贴近视频边缘的真实像素。
+    // 之前用和背景层相同的 45px 大模糊，环内就成了「模糊背景 + 清晰视频方块」的对比，
+    // 视觉上就是「视频浮在光晕上面」；环外侧与背景层的接缝交给四边渐隐处理。
+    ectx.filter = blurPx > 0.5 ? 'blur(' + (blurPx * 0.18).toFixed(2) + 'px)' : 'none';
     ectx.clearRect(0, 0, ec.width, ec.height);
     ectx.drawImage(glc, sx, sy, sw, sh, 0, 0, ec.width, ec.height);
     ectx.filter = 'none';
