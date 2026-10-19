@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.13-dev
+// @version      1.4.14-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -86,6 +86,7 @@
     resolution: 60,   // 采样纹理分辨率（占原视频宽百分比）
     maxFps: 30,
     dither: 0,        // 抖动强度 0..100（默认关，避免颗粒感）
+    radius: 50,       // 圆角 0..100：0=直角(B站原生)，50=12px(YouTube)，100=24px
   };
 
   const settings = loadSettings();
@@ -528,6 +529,14 @@ bili-comment-pictures-upload {
   z-index: 20;
 }
 
+/* ── 播放器圆角（变量由面板滑块控制）── */
+.bpx-player-video-area,
+.bpx-player-video-perch,
+.bpx-player-video-wrap {
+  border-radius: var(--ambi-radius, 12px) !important;
+  overflow: hidden !important;
+}
+
 /* ── 顶栏搜索框 ── */
 #nav-searchform .nav-search-content,
 #nav-searchform .nav-search-input,
@@ -548,6 +557,12 @@ bili-comment-pictures-upload {
   backdrop-filter: blur(16px);
 }
 `;
+
+  /** 圆角：0..100 映射到 0..24px（50 = 12px = YouTube 桌面播放器的圆角）。 */
+  function applyRadius() {
+    const px = Math.round(clamp(settings.radius, 0, 100) * 0.24);
+    document.documentElement.style.setProperty('--ambi-radius', px + 'px');
+  }
 
   function ensureBiliSurfacesTransparent() {
     if (!IS_BILIBILI) return;
@@ -1048,6 +1063,7 @@ bili-comment-pictures-upload {
       }
       ensureSidebarOpaque();
       ensureBiliSurfacesTransparent();
+      applyRadius();
     }
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
@@ -1243,6 +1259,7 @@ bili-comment-pictures-upload {
   `;
 
   const CONTROLS = [
+    { key: 'radius', label: '圆角（0=直角 / 50=YouTube / 100=更圆）', min: 0, max: 100, step: 1, unit: '' },
     { key: 'expand', label: '扩散范围', min: 10, max: 300, step: 5, unit: '%' },
     { key: 'blur', label: '模糊', min: 0, max: 100, step: 1, unit: '' },
     { key: 'opacity', label: '不透明度', min: 0, max: 100, step: 1, unit: '%' },
@@ -1365,6 +1382,7 @@ bili-comment-pictures-upload {
         shown();
         saveSettings();
         state.needDraw = true;
+        if (c.key === 'radius') applyRadius();
       });
 
       const box = document.createElement('div');
