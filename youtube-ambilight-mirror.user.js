@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.14-dev
+// @version      1.4.15-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -536,6 +536,12 @@ bili-comment-pictures-upload {
   border-radius: var(--ambi-radius, 12px) !important;
   overflow: hidden !important;
 }
+/* 视频元素本身也要跟随圆角，否则容器的 overflow 裁剪在部分布局下不生效 */
+.bpx-player-video-area video,
+.bpx-player-video-wrap video,
+.bpx-player-video-area canvas.bpx-player-video-player-canvas {
+  border-radius: var(--ambi-radius, 12px) !important;
+}
 
 /* ── 顶栏搜索框 ── */
 #nav-searchform .nav-search-content,
@@ -931,8 +937,22 @@ bili-comment-pictures-upload {
     ectx.globalCompositeOperation = 'destination-out';
     ectx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
     ectx.fillStyle = '#000';
-    ectx.fillRect(px + inset + feather * 0.5, py + inset + feather * 0.5,
-                  Math.max(1, pw - inset * 2 - feather), Math.max(1, ph - inset * 2 - feather));
+    // 用圆角矩形挖洞：直角挖洞会在视频四角留下没有被擦掉的矩形残角，
+    // 就是模糊为 0 时看到的那四个黑角。圆角半径与面板滑块保持一致。
+    {
+      const rx0 = px + inset + feather * 0.5;
+      const ry0 = py + inset + feather * 0.5;
+      const rw = Math.max(1, pw - inset * 2 - feather);
+      const rh = Math.max(1, ph - inset * 2 - feather);
+      const rr = Math.max(0, Math.min(clamp(settings.radius, 0, 100) * 0.24 * dpr, Math.min(rw, rh) / 2));
+      ectx.beginPath();
+      if (rr > 0.5 && typeof ectx.roundRect === 'function') {
+        ectx.roundRect(rx0, ry0, rw, rh, rr);
+      } else {
+        ectx.rect(rx0, ry0, rw, rh);
+      }
+      ectx.fill();
+    }
     ectx.filter = 'none';
     ectx.globalCompositeOperation = 'source-over';
 
