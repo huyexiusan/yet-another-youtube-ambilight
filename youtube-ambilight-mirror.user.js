@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.6-dev
+// @version      1.4.7-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -806,7 +806,47 @@ bili-comment-pictures-upload {
     // 光晕在图层的下面，视频是硬边矩形，交界处永远"两张皮"。
     // 这里在视频【上方】叠一圈窄环（只覆盖画面周围 ring px），内容是画面的模糊版本，
     // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
+    drawBackdrop(settings.blur * (state.ch / 512) * 1.275);
     if (IS_BILIBILI) drawEdgeFeather();
+  }
+
+  /**
+   * 投影底：把视频画面放大铺满视口并大幅模糊，作为光晕的不透明底层。
+   * 光晕半透明处透出的是这层「模糊视频」，而不是 body 背景色，
+   * 于是不会出现随主题变黑/变白的"阴影"。
+   */
+  function drawBackdrop(blurPx) {
+    const bc = state.backdropCanvas;
+    const bctx = state.backdropCtx;
+    const v = state.video;
+    if (!bc || !bctx || !v) return;
+    if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) return;
+
+    const cssW = Math.max(1, window.innerWidth);
+    const cssH = Math.max(1, window.innerHeight);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const needW = Math.round(cssW * dpr);
+    const needH = Math.round(cssH * dpr);
+    if (bc.width !== needW || bc.height !== needH) { bc.width = needW; bc.height = needH; }
+    bc.style.display = 'block';
+
+    // 等比铺满（cover）
+    const scale = Math.max(bc.width / v.videoWidth, bc.height / v.videoHeight);
+    const dw = v.videoWidth * scale;
+    const dh = v.videoHeight * scale;
+    const dx = (bc.width - dw) / 2;
+    const dy = (bc.height - dh) / 2;
+
+    try {
+      bctx.filter = 'blur(' + Math.max(8, blurPx * 1.4).toFixed(2) + 'px) saturate(1.15)';
+      bctx.fillStyle = '#000';
+      bctx.fillRect(0, 0, bc.width, bc.height);
+      bctx.drawImage(v, dx, dy, dw, dh);
+      bctx.filter = 'none';
+    } catch (e) {
+      // 跨域视频读不到像素：这一层留空，光晕照常工作
+      bc.style.display = 'none';
+    }
   }
 
   /** 边缘羽化环：视频上方的一圈窄环，把画面边缘化进光晕。 */
@@ -958,6 +998,7 @@ bili-comment-pictures-upload {
     state.host = null;
     if (state.canvas) { state.canvas.remove(); state.canvas = null; }
     if (state.edgeCanvas) { state.edgeCanvas.remove(); state.edgeCanvas = null; state.edgeCtx = null; }
+    if (state.backdropCanvas) { state.backdropCanvas.remove(); state.backdropCanvas = null; state.backdropCtx = null; }
     state.dctx = null;
     state.glCanvas = null;
     if (state.gl) { try { state.gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch (e) {} }
@@ -1003,6 +1044,20 @@ bili-comment-pictures-upload {
     }
     state.canvas = makeCanvas(state.host);
     state.dctx = state.canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+    // 投影底（backdrop）：垫在光晕下面的一层「不透明的模糊视频」。
+    // 光晕是半透明的，直接铺在页面上会透出 body 背景 —— 暗色模式透出黑、亮色模式透出白，
+    // 视频周围就出现一圈随主题变化的"阴影"。垫上这层后透出的是视频自己的颜色。
+    {
+      state.backdropCanvas = document.createElement('canvas');
+      state.backdropCanvas.id = 'ambi-mirror-backdrop-dev';
+      state.backdropCanvas.setAttribute('aria-hidden', 'true');
+      state.backdropCanvas.style.cssText =
+        'position:fixed;left:0;top:0;margin:0;padding:0;border:0;pointer-events:none;display:none;' +
+        'z-index:' + (IS_BILIBILI ? '-2' : '2147481999') + ';';
+      (document.body || document.documentElement).appendChild(state.backdropCanvas);
+      state.backdropCtx = state.backdropCanvas.getContext('2d', { alpha: false, desynchronized: true });
+    }
 
     // 边缘羽化层（仅 B 站）：视频上方的一圈窄环，负责把画面边缘溶进光晕
     if (IS_BILIBILI) {
