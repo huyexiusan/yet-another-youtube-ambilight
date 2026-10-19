@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.29-dev
+// @version      1.4.30-dev
 // @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
 // @author       huyexiusan
 // @match        *://*/*
@@ -46,7 +46,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.29-dev';
+  const SCRIPT_VERSION = '1.4.30-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
@@ -127,7 +127,7 @@
       resolution: '采样分辨率',
       maxFps: '帧率上限',
       dither: '抖动（去色带）',
-      edgeFade: '边缘渐隐（仅B站）',
+      edgeFade: '边缘渐隐',
       statusBlocked: '该视频受跨域限制，无法读取画面'
     },
     en: {
@@ -155,7 +155,7 @@
       resolution: 'Sampling resolution',
       maxFps: 'Frame rate cap',
       dither: 'Dither',
-      edgeFade: 'Edge fade (Bilibili only)',
+      edgeFade: 'Edge fade',
       statusBlocked: 'Cross-origin video: frames cannot be read'
     }
   };
@@ -936,8 +936,11 @@ bili-comment-pictures-upload {
         const ph = rectSizeY * out.height;
         // 把洞挖成「向内羽化」的：矩形先向内缩 feather/2，再模糊 feather/2，
         // 模糊后的擦除边缘正好从画面边界开始向内渐强 —— 画面外一点都不会被带走。
-        // 溶解宽度 = 模糊半径，但最多吃掉画面短边的 12%，避免大模糊时画面被吞掉
-        const feather = Math.max(1, Math.min(blurPx, Math.min(pw, ph) * 0.12));
+        // 「边缘渐隐」开关在这里的作用：羽化带宽 → 视频边界外侧那一圈光晕的
+        // alpha 过渡更缓（0.84 → 1 的斜坡变宽）→ 边缘看起来更软。
+        const featherMul = settings.edgeFade ? 1.7 : 1.0;
+        const featherCap = settings.edgeFade ? 0.16 : 0.12;
+        const feather = Math.max(1, Math.min(blurPx * featherMul, Math.min(pw, ph) * featherCap));
         dctx.globalCompositeOperation = 'destination-out';
         dctx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
         dctx.fillStyle = '#000';
@@ -1562,8 +1565,8 @@ bili-comment-pictures-upload {
     modeRow.appendChild(sel);
     panel.appendChild(modeRow);
 
-    // 边缘渐隐开关（仅 B 站）
-    if (IS_BILIBILI) {
+    // 边缘渐隐开关（两个平台都有，但实现不同）
+    {
       const efRow = document.createElement('div');
       efRow.className = 'row';
       const efLab = document.createElement('label');
@@ -1578,6 +1581,8 @@ bili-comment-pictures-upload {
         settings.edgeFade = efCb.checked;
         saveSettings();
         applyEdgeFade();
+        state.lastRect = null;
+        state.needDraw = true;
       });
       efSw.appendChild(efCb);
       efRow.appendChild(efLab);
