@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube 氛围灯 · 径向反查版［实验版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.4.34-dev
-// @description  给视频加一圈从画面中心向外扩散的氛围光晕；颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili。
+// @version      1.4.35-dev
+// @description  给网页视频加一圈从画面中心向外扩散的氛围光晕，颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili（含播放器透明化、圆角、边框渐隐）。
 // @author       huyexiusan
 // @match        *://*/*
 // @run-at       document-idle
@@ -29,8 +29,9 @@
  *   另外：
  *     - 画布铺满整个视口，光晕能一路漫到屏幕边缘；
  *     - 透明度按到画面边界的欧氏距离归一化，四个角不会出现直角硬边；
- *     - 模糊不在着色器里做，而是把画面与光晕一起交给 2D canvas 的 ctx.filter='blur()'，
- *       再用「向内羽化」挖掉画面矩形，让视频边缘溶进光晕里；
+ *     - 模糊不在着色器里做，而是把画面与光晕一起交给 2D canvas 的 ctx.filter='blur()'；
+ *       YouTube 的光晕在视频上方，再用「向内羽化」挖掉画面矩形，让边缘溶进光晕；
+ *       B 站的光晕在视频下方，不挖洞 —— 视频边缘靠 CSS mask 四边渐隐溶进光晕；
  *     - 全程 highp、不用 mipmap，避免原版 mip 崩塌和 lowp 量化引起的色块与台阶。
  */
 
@@ -46,30 +47,12 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.4.34-dev';
+  const SCRIPT_VERSION = '1.4.35-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
   // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
   const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
 
-  // 页面背景是不是深色（B 站暗夜模式 / 影院模式）。深色底用普通混合才能"发光"，
-  // 浅色底用 multiply 才不会把文字糊成一片。
-  let __darkBgCache = null;
-  let __darkBgTs = 0;
-  function isDarkPage() {
-    const now = performance.now();
-    if (__darkBgCache !== null && now - __darkBgTs < 1500) return __darkBgCache;
-    let dark = false;
-    try {
-      const bg = getComputedStyle(document.body).backgroundColor || '';
-      const m = bg.match(/\d+(\.\d+)?/g);
-      if (m && m.length >= 3) {
-        dark = 0.299 * +m[0] + 0.587 * +m[1] + 0.114 * +m[2] < 90;
-      }
-    } catch (e) { /* ignore */ }
-    __darkBgCache = dark;
-    __darkBgTs = now;
-    return dark;
-  }
+  // 1.4.35：isDarkPage() 及缓存已删除 —— 早期按页面背景亮度切混合模式用；混合模式现在固定为 normal，这个判断没人用了
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const num = (v, d) => (Number.isFinite(+v) ? +v : d);
 
@@ -754,9 +737,9 @@ bili-comment-pictures-upload {
       border: '0',
       background: 'transparent',
     });
-    // B 站：挂到 body（Vue 管不到的地方）并插在 body 的【最前面】。
-    // 关键：canvas 是 z-index:0，页面内容大多是 z-index:auto，两者同一层按 DOM 顺序排列，
-    // 所以必须让 canvas 排在 #app 之前，页面内容才会盖在光晕上面（否则光晕会盖住推荐栏）。
+    // B 站：挂到 body（Vue 管不到的地方），靠负 z-index 沉到页面内容下面。
+    // 插在 body 最前面只是稳妥习惯 —— 真正起作用的是 z-index:-1 加上
+    // attach() 里给 body 设的 isolation:isolate，不是 DOM 顺序。
     // YouTube：直接叠在播放器最上层，画面本体在着色器里已 discard，不会挡住视频。
     if (IS_BILIBILI && host === document.body) {
       host.insertBefore(c, host.firstChild);
@@ -882,7 +865,7 @@ bili-comment-pictures-upload {
       const msg = String((err && (err.name + ' ' + err.message)) || err);
       if (/security|tainted|cross-origin/i.test(msg)) {
         state.blocked = true;
-        setStatus('该视频受跨域限制，无法读取画面');
+        setStatus(t('statusBlocked'));
       }
     }
   }
@@ -911,13 +894,10 @@ bili-comment-pictures-upload {
     gl.bindTexture(gl.TEXTURE_2D, state.tex);
 
     const u = state.u;
-    // 光晕衰减范围（以画面高度为单位）：
-    //   YouTube：用视口短边，铺满全屏；
-    //   B 站：参考原版几何，只贴在播放器周围（视频短边的 18%），
-    //         不做全屏扩散，否则一定会盖住标题 / 推荐列表 / 评论。
-    const expandPx = Math.max(1, IS_BILIBILI
-      ? Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100
-      : Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
+    // 光晕衰减范围：按视口短边算，两个平台一致（120% ≈ 铺满全屏）。
+    // 早期这里给 B 站单独收窄过，怕盖住标题 / 推荐 / 评论；后来改用
+    // 「body isolation + #app 透明 + 负 z-index」解决遮挡，就不需要收窄了。
+    const expandPx = Math.max(1, Math.min(window.innerWidth, window.innerHeight) * settings.expand / 100);
     const expandHi = expandPx / L.dispH;
 
     const rectMinX = L.rectMinX;
@@ -946,8 +926,7 @@ bili-comment-pictures-upload {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    // B 站：混合模式固定为普通叠加（不用 multiply，避免把页面压暗）；
-    // 浅色页面靠收窄扩散范围来避免糊住文字，见下面的 expandPx。
+    // 混合模式固定为普通叠加。multiply 会压暗页面、screen 会泛白，两个都试过并否决了。
 
     // —— 浏览器原生高斯模糊（参考原版：2D canvas + ctx.filter）
     const dctx = state.dctx;
@@ -1016,205 +995,16 @@ bili-comment-pictures-upload {
       }
     }
 
-    // —— 边缘羽化层（仅 B 站）——
-    // 光晕在图层的下面，视频是硬边矩形，交界处永远"两张皮"。
-    // 这里在视频【上方】叠一圈窄环（只覆盖画面周围 ring px），内容是画面的模糊版本，
-    // 用 destination-out 向内羽化 → 视频边缘半透明地溶进光晕，效果等同于 YouTube 版。
-    // 视频底已停用：用户要的是彻底不要这一层。
-    // 它的边界（视频 + pad）会形成一圈看得见的矩形框，pad 改小只是让框变小。
-    // 圆角黑角由「圆角挖洞」负责 —— 挖洞半径和容器的 border-radius 是同一套
-    // 换算，圆角处挖掉的范围正好等于视频被裁掉的范围，露出的是光晕而不是 body。
-    // if (IS_BILIBILI && settings.radius > 0) drawVideoBackdrop();
-    // 边缘羽化环已停用：模糊调高时它会露出一圈明显的光边
+    // 到这里光晕就画完了。两个平台的区别只在这一步：
+    //   YouTube —— 画布在视频上方，必须把画面矩形挖掉，视频才透得出来；
+    //   B 站 —— 画布在视频下方，什么都不用擦，视频自己盖在上面。
   }
 
-  /**
-   * 投影底：把视频画面放大铺满视口并大幅模糊，作为光晕的不透明底层。
-   * 光晕半透明处透出的是这层「模糊视频」，而不是 body 背景色，
-   * 于是不会出现随主题变黑/变白的"阴影"。
-   */
-  function drawBackdrop(blurPx) {
-    const bc = state.backdropCanvas;
-    const bctx = state.backdropCtx;
-    const v = state.video;
-    if (!bc || !bctx || !v) return;
-    if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) return;
+  // 1.4.35：drawBackdrop（全屏投影底）已删除 —— 会在滚动时错位，1.4.9 就被否决了
 
-    const cssW = Math.max(1, window.innerWidth);
-    const cssH = Math.max(1, window.innerHeight);
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const needW = Math.round(cssW * dpr);
-    const needH = Math.round(cssH * dpr);
-    if (bc.width !== needW || bc.height !== needH) { bc.width = needW; bc.height = needH; }
-    bc.style.display = 'block';
+  // 1.4.35：drawVideoBackdrop（视频底）已删除 —— 同上，圆角现在由「画面矩形的本色贴图 + 视频自身圆角」兜住
 
-    // 等比铺满（cover）
-    const scale = Math.max(bc.width / v.videoWidth, bc.height / v.videoHeight);
-    const dw = v.videoWidth * scale;
-    const dh = v.videoHeight * scale;
-    const dx = (bc.width - dw) / 2;
-    const dy = (bc.height - dh) / 2;
-
-    try {
-      bctx.filter = 'blur(' + Math.max(8, blurPx * 1.4).toFixed(2) + 'px) saturate(1.15)';
-      bctx.fillStyle = '#000';
-      bctx.fillRect(0, 0, bc.width, bc.height);
-      bctx.drawImage(v, dx, dy, dw, dh);
-      bctx.filter = 'none';
-    } catch (e) {
-      // 跨域视频读不到像素：这一层留空，光晕照常工作
-      bc.style.display = 'none';
-    }
-  }
-
-  /**
-   * 视频底：只覆盖「视频 + 一点」的一层模糊视频，垫在视频下面。
-   * 视频容器做圆角后，四个角会裁掉一小块，露出下层；如果下层是透明的，
-   * 就会透出 body 的深色 —— 就是那四个黑角。垫上这层之后露出的是视频自己的颜色。
-   * 尺寸和位置每帧跟随 video，滚动时不会脱节。
-   */
-  function drawVideoBackdrop() {
-    const bc = state.backdropCanvas;
-    const bctx = state.backdropCtx;
-    const v = state.video;
-    if (!bc || !bctx || !v) return;
-    if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) return;
-
-    const vr = v.getBoundingClientRect();
-    if (vr.width < 8 || vr.height < 8) return;
-
-    // 内边距只需要盖住圆角裁掉的那几个角。以前固定 40px，多出来的部分在
-    // 视频四周形成一块边界整齐的矩形 —— 也就是肉眼能看见的那圈「框」。
-    const pad = Math.max(8, Math.round(clamp(settings.radius, 0, 100) * 0.24) + 4);
-    const w = Math.ceil(vr.width + pad * 2);
-    const h = Math.ceil(vr.height + pad * 2);
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const needW = Math.round(w * dpr);
-    const needH = Math.round(h * dpr);
-    if (bc.width !== needW || bc.height !== needH) { bc.width = needW; bc.height = needH; }
-    bc.style.display = 'block';
-    bc.style.left = (vr.left - pad) + 'px';
-    bc.style.top = (vr.top - pad) + 'px';
-    bc.style.width = w + 'px';
-    bc.style.height = h + 'px';
-
-    const scale = Math.max(bc.width / v.videoWidth, bc.height / v.videoHeight);
-    const dw = v.videoWidth * scale;
-    const dh = v.videoHeight * scale;
-    const dx = (bc.width - dw) / 2;
-    const dy = (bc.height - dh) / 2;
-
-    try {
-      bctx.filter = 'blur(24px) saturate(1.1)';
-      bctx.fillStyle = '#000';
-      bctx.fillRect(0, 0, bc.width, bc.height);
-      bctx.drawImage(v, dx, dy, dw, dh);
-      bctx.filter = 'none';
-    } catch (e) {
-      bc.style.display = 'none';
-    }
-  }
-
-  /** 边缘羽化环：视频上方的一圈窄环，把画面边缘化进光晕。 */
-  function drawEdgeFeather() {
-    const ec = state.edgeCanvas;
-    const ectx = state.edgeCtx;
-    const glc = state.glCanvas;
-    if (!ec || !ectx || !glc || !state.video) return;
-
-    const vr = state.video.getBoundingClientRect();
-    if (!vr.width || !vr.height) return;
-
-    const blurPx = settings.blur * (state.ch / 512) * 1.275;
-    // 左侧/上下给足羽化空间；右侧必须收窄，否则会压到推荐栏（视频右边 892，推荐栏 922）
-    const ringL = Math.max(200, Math.min(400, blurPx * 9));
-    const ringR = ringL;   // 右侧会被推荐栏(z-index:20)盖住，不再限制
-    const x = vr.left - ringL;
-    const y = vr.top - ringL;
-    const w = Math.ceil(vr.width + ringL + ringR);
-    const h = Math.ceil(vr.height + ringL * 2);
-    if (w < 8 || h < 8) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const needW = Math.round(w * dpr);
-    const needH = Math.round(h * dpr);
-    if (ec.width !== needW || ec.height !== needH) { ec.width = needW; ec.height = needH; }
-    ec.style.display = 'block';
-    ec.style.left = x + 'px';
-    ec.style.top = y + 'px';
-    ec.style.width = w + 'px';
-    ec.style.height = h + 'px';
-    ec.style.zIndex = '15';   // 视频之上、顶栏(1002)与控制栏之下
-
-    // 从已渲染的光晕画布里，裁出画面周围这一块
-    const glW = glc.width;
-    const glH = glc.height;
-    const vw = Math.max(1, window.innerWidth);
-    const vh = Math.max(1, window.innerHeight);
-    const sx = (x / vw) * glW;
-    const sy = (y / vh) * glH;
-    const sw = (w / vw) * glW;
-    const sh = (h / vh) * glH;
-
-    ectx.setTransform(1, 0, 0, 1, 0, 0);
-    // 环内只做轻微模糊：颜色要尽量贴近视频边缘的真实像素。
-    // 之前用和背景层相同的 45px 大模糊，环内就成了「模糊背景 + 清晰视频方块」的对比，
-    // 视觉上就是「视频浮在光晕上面」；环外侧与背景层的接缝交给四边渐隐处理。
-    ectx.filter = blurPx > 0.5 ? 'blur(' + Math.max(2, blurPx * 0.45).toFixed(2) + 'px)' : 'none';
-    ectx.clearRect(0, 0, ec.width, ec.height);
-    ectx.drawImage(glc, sx, sy, sw, sh, 0, 0, ec.width, ec.height);
-    ectx.filter = 'none';
-
-    // 向内羽化地挖掉画面矩形 —— 与 YouTube 版完全相同的做法
-    const px = (ringL / w) * ec.width;
-    const py = (ringL / h) * ec.height;
-    const pw = (vr.width / w) * ec.width;
-    const ph = (vr.height / h) * ec.height;
-    // 羽化不超过环宽的 85%，否则羽化带超出环会被裁掉，交界反而更硬
-    const feather = Math.max(6, Math.min(blurPx * 1.5 * dpr, Math.min(ringL, ringR) * 0.9 * dpr, Math.min(pw, ph) * 0.2));
-    // 挖洞内缩：模糊越大，露出的底色范围越大，所以内缩深度必须和 blurPx 严格成正比。
-    // （之前被 短边×0.06 ≈ 26px 卡住上限，实际只吃到 25px，看起来就是这么浅。）
-    const inset = Math.max(0, Math.min(blurPx * 1.15 * dpr, Math.min(pw, ph) * 0.16));
-    ectx.globalCompositeOperation = 'destination-out';
-    ectx.filter = 'blur(' + (feather * 0.5).toFixed(2) + 'px)';
-    ectx.fillStyle = '#000';
-    ectx.fillRect(px + inset + feather * 0.5, py + inset + feather * 0.5,
-                  Math.max(1, pw - inset * 2 - feather), Math.max(1, ph - inset * 2 - feather));
-    ectx.filter = 'none';
-    ectx.globalCompositeOperation = 'source-over';
-
-    // 环的外边界做渐隐 —— 否则环内（这里画的）和环外（背景层画的）会在 ring 处
-    // 留下一条硬分界线（两侧都写过同一个像素，模糊的边缘效应也不同）。
-    const fade = Math.max(12, Math.min(60, ringL * 0.7));
-    ectx.globalCompositeOperation = 'destination-in';
-    let fadeGrad;
-
-    fadeGrad = ectx.createLinearGradient(0, 0, 0, fade);
-    fadeGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    fadeGrad.addColorStop(1, 'rgba(0,0,0,1)');
-    ectx.fillStyle = fadeGrad;
-    ectx.fillRect(0, 0, ec.width, fade);
-
-    fadeGrad = ectx.createLinearGradient(0, ec.height, 0, ec.height - fade);
-    fadeGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    fadeGrad.addColorStop(1, 'rgba(0,0,0,1)');
-    ectx.fillStyle = fadeGrad;
-    ectx.fillRect(0, ec.height - fade, ec.width, fade);
-
-    fadeGrad = ectx.createLinearGradient(0, 0, fade, 0);
-    fadeGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    fadeGrad.addColorStop(1, 'rgba(0,0,0,1)');
-    ectx.fillStyle = fadeGrad;
-    ectx.fillRect(0, 0, fade, ec.height);
-
-    fadeGrad = ectx.createLinearGradient(ec.width, 0, ec.width - fade, 0);
-    fadeGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    fadeGrad.addColorStop(1, 'rgba(0,0,0,1)');
-    ectx.fillStyle = fadeGrad;
-    ectx.fillRect(ec.width - fade, 0, fade, ec.height);
-
-    ectx.globalCompositeOperation = 'source-over';
-  }
+  // 1.4.35：drawEdgeFeather（边缘羽化环）已删除 —— 它是在给「挖洞削掉的 alpha」打补丁，1.4.26 让 B 站不再挖洞后就没有存在意义了
 
   function tick(ts) {
     state.rafId = requestAnimationFrame(tick);
@@ -1288,6 +1078,14 @@ bili-comment-pictures-upload {
     // 只有「同一个 video 且已经成功启动」才跳过；启动失败过就允许重试
     if (state.video === video && state.started) return;
     deinit();
+
+    // 收掉旧版本残留在 DOM 里的辅助画布（1.4.24 / 1.4.26 删掉的那两层）。
+    // state 里已经没有它们的引用，只能按 id 找 —— 不清理的话，升级脚本之后
+    // 旧画布会一直挂在页面上，看起来就像「改了没生效」。
+    ['ambi-mirror-edge-dev', 'ambi-mirror-backdrop-dev'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    });
 
     state.video = video;
     state.host = pickHost(video);
