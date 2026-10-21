@@ -84,6 +84,19 @@ The glow layer sits on **opposite sides** of the video on the two sites, so the 
 | How the edge fades | Widen the hole's feather | CSS `mask`, alpha fading on all four edges |
 | Why they differ | A mask would let the page **background** show through the video edge, darkening it | Here the mask reveals the blurred frame inside the glow — that is the actual blend |
 
+## Light vs dark pages
+
+The effect is noticeably better on **dark pages** (Bilibili's night mode, YouTube's dark theme). On light pages it degrades.
+
+The reason is what ambient light actually is: *light shining in the dark*. On a dark background the glow can spread outward from the frame and read as real light. On a light background it can only tint the page — the contrast is washed out and it looks more like **color spill** than **glow**.
+
+Dark content adds another problem: a near-opaque dark glow over a light page turns the whole thing grey. So there is a **dark-content guard** — when the sampled color is very dark the glow strength drops automatically (below `0.03` luminance it keeps only 10%). That stops light pages from looking muddy, but the overall result still trails dark mode.
+
+If you mostly use light pages, try:
+
+- lowering **Opacity** to 60–70%
+- or switching the site to its dark theme — the difference is obvious
+
 ## Known limitations
 
 - Videos served cross-origin without CORS cannot be read; the script detects this and disables itself

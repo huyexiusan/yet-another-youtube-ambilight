@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         视频氛围灯 · 径向反查版
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.5.0
+// @version      1.5.1
 // @description  给网页视频加一圈从画面中心向外扩散的氛围光晕，颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili（含播放器透明化、圆角、边框渐隐）。
 // @author       huyexiusan
-// @match        *://*/*
+// @match        *://*.youtube.com/*
+// @match        *://*.bilibili.com/*
 // @run-at       document-idle
 // @downloadURL  https://cdn.jsdelivr.net/gh/huyexiusan/yet-another-youtube-ambilight@latest/youtube-ambilight-mirror.user.js
 // @updateURL    https://cdn.jsdelivr.net/gh/huyexiusan/yet-another-youtube-ambilight@latest/youtube-ambilight-mirror.user.js
@@ -41,16 +42,24 @@
   /* =========================================================================
    * 0. 基础工具
    * ========================================================================= */
+  // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
+  const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
+  const IS_YOUTUBE = /(^|\.)youtube\.com$/i.test(location.hostname);
+
+  // 只在这两个站点运行。@match 已经在油猴层面拦住了，这里是第二道闸：
+  // 用 CDP / 手动注入、或者油猴里存的是旧版 @match（*://*/*）时，
+  // 也不会跑到别的网站上去。
+  // 这一步放在 BOOT_FLAG 之前：不支持的站点上连标记都不占用，什么都不做。
+  if (!IS_BILIBILI && !IS_YOUTUBE) return;
+
   const BOOT_FLAG = '__ambiMirrorBooted__';
   if (window[BOOT_FLAG]) return;
   window[BOOT_FLAG] = true;
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.5.0';
+  const SCRIPT_VERSION = '1.5.1';
   const LS_KEY = 'ambi_mirror_settings_v1';
-  // 平台判断：B 站（www/player）与 YouTube 的层叠结构完全不同
-  const IS_BILIBILI = /(^|\.)bilibili\.com$/i.test(location.hostname);
 
   // 1.4.35：isDarkPage() 及缓存已删除 —— 早期按页面背景亮度切混合模式用；混合模式现在固定为 normal，这个判断没人用了
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -336,6 +345,13 @@ void main() {
   c += (n - 0.5) * uDither;
 
   c = clamp(c, 0.0, 1.0);
+
+  // 暗色保护：取到的颜色太暗时收一下强度。
+  // 浅色页面上叠一层暗色光晕会被糊成一片灰 —— 黑屏/暗场景视频周围「发脏」就是这么来的。
+  // 亮度低于 0.03 基本让光晕退场，0.28 以上完全不受影响，中间平滑过渡。
+  float glowLuma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  alpha *= mix(0.10, 1.0, smoothstep(0.03, 0.28, glowLuma));
+
   outColor = vec4(c * alpha, alpha);   // 预乘 alpha
 }`;
 
@@ -670,7 +686,18 @@ bili-comment-pictures-upload {
   mask-size: 100% 100%;
 }
 
-/* ── 顶栏搜索框 ── */
+/* ── 视频页最上方顶栏：整条透明化，让光晕能透上来 ──
+   实测背景：.bili-header__menu / .bili-header__bar 是纯白 rgb(255,255,255)
+   外加一层 0 2px 8px rgba(0,0,0,.08) 的投影；三个子栏（left/center/right）
+   本来就是透明的，所以要清的只有外框和搜索框。 */
+.bili-header__menu,
+.bili-header__bar {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ── 顶栏搜索框（连 form 本身的灰底一起去掉，只留边框）── */
+#nav-searchform,
 #nav-searchform .nav-search-content,
 #nav-searchform .nav-search-input,
 #nav-searchform .nav-search-btn {
