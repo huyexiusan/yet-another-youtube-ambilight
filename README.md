@@ -19,11 +19,19 @@
 
 ## 安装
 
-先装 [Tampermonkey](https://www.tampermonkey.net/)，然后：
+先装 [Tampermonkey](https://www.tampermonkey.net/)，然后二选一：
 
-> 👉 **[安装脚本](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-mirror.user.js)**
+**正式版**（推荐，稳定）
 
-点开会自动弹出安装页。也可以把 `youtube-ambilight-mirror.user.js` 拖进浏览器窗口，或复制内容到 Tampermonkey「添加新脚本」。
+> 👉 **[安装正式版](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-mirror.user.js)**
+
+**测试版**（新功能先在这里跑）
+
+> 👉 **[安装测试版](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-dev.user.js)**
+
+两版可以同时安装：脚本名、内部启动标记、设置存储、画布 id 全部隔离。但**不要同时启用**——两个都会画光晕，叠起来会亮一倍。
+
+点开链接会自动弹出安装页。也可以把 `.user.js` 文件拖进浏览器窗口，或复制内容到 Tampermonkey「添加新脚本」。
 
 ## 使用
 
@@ -89,10 +97,22 @@
 
 | 文件 | 说明 |
 |---|---|
-| `youtube-ambilight-mirror.user.js` | 油猴脚本本体 |
+| `youtube-ambilight-mirror.user.js` | **正式版**，稳定，装这一个就够 |
+| `youtube-ambilight-dev.user.js` | **测试版**，新功能先在这里验证；满意后用 `node tools/promote.mjs` 生成正式版 |
 | `demo-mirror-vs-clamp.html` | 浏览器实时对比页 |
 | `test-video.html` | 本地端到端测试页（canvas → `captureStream` → `<video>`） |
 | `tools/sim_compare.py` | CPU 逐像素仿真，用于生成对比图 |
+| `tools/promote.mjs` | 测试版 → 正式版转换（版本号、标识、自动更新地址） |
+
+### 开发流程
+
+```
+改 youtube-ambilight-dev.user.js  →  浏览器里验证  →  node tools/promote.mjs
+        ↑                                                     ↓
+        └────────────── 继续迭代 ←──── youtube-ambilight-mirror.user.js
+```
+
+`promote.mjs` 只做机械转换：去掉 `-dev` 后缀、把 `@name` / `BOOT_FLAG` / `LS_KEY` / 画布 id 转成正式版、修正自动更新地址。所以平时**只需要改测试版那一个文件**。
 
 ## License
 

@@ -19,11 +19,19 @@ Works on **YouTube** and **Bilibili**. On Bilibili the glow sits in the page bac
 
 ## Install
 
-Install [Tampermonkey](https://www.tampermonkey.net/) first, then:
+Install [Tampermonkey](https://www.tampermonkey.net/) first, then pick one:
 
-> 👉 **[Install the userscript](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-mirror.user.js)**
+**Stable** (recommended)
 
-Clicking the link opens Tampermonkey's install page. Alternatively, drag `youtube-ambilight-mirror.user.js` into a browser window, or paste its content into a new Tampermonkey script.
+> 👉 **[Install stable](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-mirror.user.js)**
+
+**Dev** (new features land here first)
+
+> 👉 **[Install dev build](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-dev.user.js)**
+
+Both can be installed side by side: script name, boot flag, settings storage and canvas ids are all separate. Just don't **enable both at once** — each draws its own glow, and they add up to double brightness.
+
+Clicking a link opens Tampermonkey's install page. Alternatively, drag the `.user.js` file into a browser window, or paste its content into a new Tampermonkey script.
 
 ## Usage
 
@@ -89,10 +97,22 @@ The glow layer sits on **opposite sides** of the video on the two sites, so the 
 
 | File | Description |
 |---|---|
-| `youtube-ambilight-mirror.user.js` | The userscript itself |
+| `youtube-ambilight-mirror.user.js` | **Stable** build — this is the one to install |
+| `youtube-ambilight-dev.user.js` | **Dev** build — new features are tested here first; run `node tools/promote.mjs` to turn it into the stable build |
 | `demo-mirror-vs-clamp.html` | Live side-by-side comparison page |
 | `test-video.html` | End-to-end test page (canvas → `captureStream` → `<video>`) |
 | `tools/sim_compare.py` | CPU per-pixel simulation used to render comparison images |
+| `tools/promote.mjs` | Dev → stable conversion (version, identifiers, update URL) |
+
+### Workflow
+
+```
+edit youtube-ambilight-dev.user.js  →  verify in browser  →  node tools/promote.mjs
+          ↑                                                          ↓
+          └──────────── keep iterating ←──── youtube-ambilight-mirror.user.js
+```
+
+`promote.mjs` is purely mechanical: it strips the `-dev` suffix and rewrites `@name` / `BOOT_FLAG` / `LS_KEY` / canvas ids / update URL. In day-to-day work you only touch the dev file.
 
 ## License
 
