@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         视频氛围灯 · 径向反查版［测试版］
 // @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev
-// @version      1.5.1-dev
+// @version      1.5.2-dev
 // @description  给网页视频加一圈从画面中心向外扩散的氛围光晕，颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili（含播放器透明化、圆角、边框渐隐）。
 // @author       huyexiusan
 // @match        *://*.youtube.com/*
@@ -58,7 +58,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.5.1-dev';
+  const SCRIPT_VERSION = '1.5.2-dev';
   const LS_KEY = 'ambi_mirror_settings_v1_dev';
 
   // 1.4.35：isDarkPage() 及缓存已删除 —— 早期按页面背景亮度切混合模式用；混合模式现在固定为 normal，这个判断没人用了
@@ -1235,17 +1235,21 @@ bili-comment-pictures-upload {
       if (state.video.paused || state.video.ended) draw(true);   // 跳过帧上传，只重画位置
     });
   }, { passive: true, capture: true });
+  // 进入和退出全屏都必须重建画布：
+  //   进入 —— 浏览器只渲染 fullscreenElement 的子树，画布不挪进去就完全不显示；
+  //   退出 —— 必须挪回来。画布是 position:fixed 铺满视口，如果退出后还挂在
+  //          原来的全屏容器里，z-index 又很高（YouTube 用 2147482000），
+  //          就会压在整个页面 UI 上面 —— 这就是「退出全屏后光晕盖住推荐栏」的成因。
+  let fsRebuildTimer = 0;
   document.addEventListener('fullscreenchange', () => {
-    // 全屏时只渲染全屏元素内部，需要把画布挪进全屏容器
-    const fsEl = document.fullscreenElement;
-    if (fsEl && state.video && fsEl.contains(state.video)) {
-      const v = state.video;
+    const v = state.video;
+    if (!v) return;
+    clearTimeout(fsRebuildTimer);
+    fsRebuildTimer = setTimeout(() => {
+      if (!document.contains(v)) return;   // 视频元素被换掉了，交给 bootstrap 的定时检查处理
       deinit();
-      setTimeout(() => attach(v), 60);
-    } else if (state.video) {
-      state.lastRect = null;
-      state.needDraw = true;
-    }
+      attach(v);
+    }, 60);
   });
   document.addEventListener('yt-navigate-finish', () => {
     state.lastRect = null;
