@@ -1,4 +1,4 @@
-# 视频氛围灯 · 径向反查版
+# 视频氛围灯 · 晕染
 
 > 中文 | [English](README.en.md)
 
@@ -23,11 +23,11 @@
 
 **正式版**（推荐，稳定）
 
-> 👉 **[安装正式版](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-mirror.user.js)**
+> 👉 **[安装正式版](https://raw.githubusercontent.com/huyexiusan/yet-another-video-ambilight/main/youtube-ambilight-mirror.user.js)**
 
 **测试版**（新功能先在这里跑）
 
-> 👉 **[安装测试版](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-dev.user.js)**
+> 👉 **[安装测试版](https://raw.githubusercontent.com/huyexiusan/yet-another-video-ambilight/main/youtube-ambilight-dev.user.js)**
 
 两版可以同时安装：脚本名、内部启动标记、设置存储、画布 id 全部隔离。但**不要同时启用**——两个都会画光晕，叠起来会亮一倍。
 

@@ -1,4 +1,4 @@
-# Ambient Light for Videos — Radial Sampling Edition
+# Ambient Light for Videos
 
 > [中文](README.md) | English
 
@@ -23,11 +23,11 @@ Install [Tampermonkey](https://www.tampermonkey.net/) first, then pick one:
 
 **Stable** (recommended)
 
-> 👉 **[Install stable](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-mirror.user.js)**
+> 👉 **[Install stable](https://raw.githubusercontent.com/huyexiusan/yet-another-video-ambilight/main/youtube-ambilight-mirror.user.js)**
 
 **Dev** (new features land here first)
 
-> 👉 **[Install dev build](https://raw.githubusercontent.com/huyexiusan/yet-another-youtube-ambilight/main/youtube-ambilight-dev.user.js)**
+> 👉 **[Install dev build](https://raw.githubusercontent.com/huyexiusan/yet-another-video-ambilight/main/youtube-ambilight-dev.user.js)**
 
 Both can be installed side by side: script name, boot flag, settings storage and canvas ids are all separate. Just don't **enable both at once** — each draws its own glow, and they add up to double brightness.
 

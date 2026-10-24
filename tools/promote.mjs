@@ -36,9 +36,9 @@ src = src.replace(/const SCRIPT_VERSION = '[\d.]+-dev';/, `const SCRIPT_VERSION 
 
 // ── 2. 标识转换 ────────────────────────────────────────────────
 const reps = [
-  ['// @name         视频氛围灯 · 径向反查版［测试版］', '// @name         视频氛围灯 · 径向反查版'],
-  ['// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight/dev',
-   '// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight'],
+  ['// @name         视频氛围灯 · 晕染［测试版］', '// @name         视频氛围灯 · 晕染'],
+  ['// @namespace    https://github.com/huyexiusan/yet-another-video-ambilight/dev',
+   '// @namespace    https://github.com/huyexiusan/yet-another-video-ambilight'],
   ["const BOOT_FLAG = '__ambiMirrorBootedDev__';", "const BOOT_FLAG = '__ambiMirrorBooted__';"],
   ["const LS_KEY = 'ambi_mirror_settings_v1_dev';", "const LS_KEY = 'ambi_mirror_settings_v1';"],
   ["'ambi-mirror-bili-css-dev'", "'ambi-mirror-bili-css'"],
@@ -49,6 +49,9 @@ const reps = [
   ['ambilight@latest/youtube-ambilight-dev.user.js', 'ambilight@latest/youtube-ambilight-mirror.user.js'],
 ];
 
+// 这些是「名字类」规则，一条都不能漏，否则会发出带测试标记的正式版
+const nameReps = new Set([reps[0][0], reps[1][0]]);
+
 const missed = [];
 for (const [from, to] of reps) {
   if (!src.includes(from)) { missed.push(from.slice(0, 50)); continue; }
@@ -57,12 +60,18 @@ for (const [from, to] of reps) {
 if (missed.length) {
   console.log('⚠ 这些没匹配到（可能已经改过或代码变了）：');
   missed.forEach((m) => console.log('   ' + m));
+  // 名字类规则漏掉必须直接失败 —— 否则会发出一个名字还带［测试版］的「正式版」
+  const fatal = missed.some((m) => [...nameReps].some((n) => n.startsWith(m)));
+  if (fatal) {
+    console.error('✗ 名字转换规则没匹配上（脚本改名了？先更新 tools/promote.mjs 的规则再跑）');
+    process.exit(1);
+  }
 }
 
-// ── 3. 自检：不该有 dev 残留 ────────────────────────────────────
-const left = src.match(/ambi-mirror-(canvas|edge|backdrop|bili-css)-dev|__ambiMirrorBootedDev__|_settings_v1_dev|@version\s+\S*-dev/g);
+// ── 3. 自检：不该有 dev / 测试版残留 ────────────────────────────
+const left = src.match(/ambi-mirror-(canvas|edge|backdrop|bili-css)-dev|__ambiMirrorBootedDev__|_settings_v1_dev|@version\s+\S*-dev|［测试版］/g);
 if (left) {
-  console.error('✗ 仍有 dev 标识残留:', [...new Set(left)].join(', '));
+  console.error('✗ 仍有 dev/测试版残留:', [...new Set(left)].join(', '));
   process.exit(1);
 }
 

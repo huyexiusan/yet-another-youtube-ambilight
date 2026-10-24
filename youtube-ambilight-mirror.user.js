@@ -1,14 +1,14 @@
 // ==UserScript==
-// @name         视频氛围灯 · 径向反查版
-// @namespace    https://github.com/huyexiusan/yet-another-youtube-ambilight
-// @version      1.5.2
+// @name         视频氛围灯 · 晕染
+// @namespace    https://github.com/huyexiusan/yet-another-video-ambilight
+// @version      1.6.0
 // @description  给网页视频加一圈从画面中心向外扩散的氛围光晕，颜色沿半径回到画面内部回查。支持 YouTube 与 Bilibili（含播放器透明化、圆角、边框渐隐）。
 // @author       huyexiusan
 // @match        *://*.youtube.com/*
 // @match        *://*.bilibili.com/*
 // @run-at       document-idle
-// @downloadURL  https://cdn.jsdelivr.net/gh/huyexiusan/yet-another-youtube-ambilight@latest/youtube-ambilight-mirror.user.js
-// @updateURL    https://cdn.jsdelivr.net/gh/huyexiusan/yet-another-youtube-ambilight@latest/youtube-ambilight-mirror.user.js
+// @downloadURL  https://cdn.jsdelivr.net/gh/huyexiusan/yet-another-video-ambilight@latest/youtube-ambilight-mirror.user.js
+// @updateURL    https://cdn.jsdelivr.net/gh/huyexiusan/yet-another-video-ambilight@latest/youtube-ambilight-mirror.user.js
 // @grant        none
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMxYTFhMWEiLz48cmVjdCB4PSIyMCIgeT0iMjAiIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgcng9IjMiIGZpbGw9IiNmZmYiLz48L3N2Zz4=
 // ==/UserScript==
@@ -58,7 +58,7 @@
 
   // 版本号：面板标题和 __ambiMirror.version 都会显示它。
   // 排查「改了怎么没生效」时第一件事就是看这里 —— 大概率是装到旧版本了。
-  const SCRIPT_VERSION = '1.5.2';
+  const SCRIPT_VERSION = '1.6.0';
   const LS_KEY = 'ambi_mirror_settings_v1';
 
   // 1.4.35：isDarkPage() 及缓存已删除 —— 早期按页面背景亮度切混合模式用；混合模式现在固定为 normal，这个判断没人用了
@@ -97,14 +97,14 @@
    * ========================================================================= */
   const I18N = {
     zh: {
-      title: '氛围灯 · 径向反查',
+      title: '氛围灯 · 晕染',
       lang: '语言',
       enabled: '启用',
       hint: '以画面中心为极点沿半径反查：光晕往外延展多少，就往画面里回查多少（1:1），贴着画面处取边界色。',
       mode: '采样方式',
       mode_sweep: '径向反查 1:1（默认）',
       mode_mirror: '镜像折叠',
-      mode_clamp: '边缘拉伸（原版）',
+      mode_clamp: '边缘拉伸',
       radius: '圆角（仅B站生效）',
       radiusNote: '0=直角(B站原生) / 50=12px(YouTube) / 100=24px(更圆)',
       expand: '扩散范围',
@@ -126,14 +126,14 @@
       statusBlocked: '该视频受跨域限制，无法读取画面'
     },
     en: {
-      title: 'Ambient Light · Radial Sampling',
+      title: 'Ambient Light',
       lang: 'Language',
       enabled: 'Enabled',
       hint: 'Polar sampling: the glow reaches outward by the same distance it looks back into the frame (1:1), so the halo keeps the colors of the real edge pixels.',
       mode: 'Sampling mode',
       mode_sweep: 'Radial 1:1 (default)',
       mode_mirror: 'Mirror fold',
-      mode_clamp: 'Edge stretch (original)',
+      mode_clamp: 'Edge stretch',
       radius: 'Corner radius (Bilibili only)',
       radiusNote: '0 = square (native) / 50 = 12px (YouTube) / 100 = 24px',
       expand: 'Spread',
